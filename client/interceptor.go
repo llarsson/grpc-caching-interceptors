@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/hashicorp/terraform/helper/hashcode"
-	"github.com/llarsson/protobuf/proto"
 	"github.com/patrickmn/go-cache"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
