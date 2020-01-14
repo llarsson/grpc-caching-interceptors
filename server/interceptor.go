@@ -46,23 +46,24 @@ type ValidityEstimator interface {
 
 // ConfigurableValidityEstimator is a configurable ValidityEstimator.
 type ConfigurableValidityEstimator struct {
-	verifiers cache.Cache
+	verifiers *cache.Cache
 	scheduler chan int
 }
 
 // Initialize new ConfigurableValidityEstimator.
 func (e *ConfigurableValidityEstimator) Initialize() {
-	e.verifiers = cache.Cache{}
+	e.verifiers = cache.New(time.Duration(MaximumCacheValidity)*time.Second, time.Duration(MaximumCacheValidity)*10*time.Second)
 	e.scheduler = make(chan int)
 	go func() {
-		delay := 10
 		for {
 			select {
-			case e.scheduler <- delay:
+			case delay, more := <-e.scheduler:
+				if !more {
+					log.Printf("Closing down verification estimation")
+					return
+				}
 				time.Sleep(time.Duration(delay) * time.Second)
 				e.verifyEstimations()
-			case <-e.scheduler:
-				return
 			}
 		}
 	}()
@@ -72,7 +73,7 @@ func (e *ConfigurableValidityEstimator) Initialize() {
 // Stop the validation process. This can be done only once, as the
 // validation process will not continue.
 func (e *ConfigurableValidityEstimator) Stop() {
-	<-e.scheduler
+	close(e.scheduler)
 }
 
 // estimateMaxAge estimates the cache validity of the specified
@@ -127,11 +128,12 @@ func (e *ConfigurableValidityEstimator) UnaryServerInterceptor() grpc.UnaryServe
 	}
 }
 
-func verificationNeeded(method string, req interface{}) bool {
+func (e *ConfigurableValidityEstimator) verificationNeeded(method string, req interface{}) bool {
 	return true
 }
 
 type verifierMetadata struct {
+	method        string
 	req           interface{}
 	target        string
 	previousReply interface{}
@@ -142,42 +144,53 @@ type verifierMetadata struct {
 // times.
 func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-
+		// TODO(llarsson): store headers as well
 		err := invoker(ctx, method, req, reply, cc, opts...)
 		if err != nil {
 			return err
 		}
 
-		reqMessage := req.(proto.Message)
-		hash := hashcode.Strings([]string{method, reqMessage.String()})
-		md := verifierMetadata{req: req, target: cc.Target(), previousReply: reply}
-		err = e.verifiers.Add(hash, md, MaximumCacheValidity*time.Second)
-		if err != nil {
-			log.Printf("Failed to store verification metadata: %v", err)
+		if e.verificationNeeded(method, req) {
+			reqMessage := req.(proto.Message)
+			hash := hashcode.Strings([]string{method, reqMessage.String()})
+			md := verifierMetadata{method: method, req: req, target: cc.Target(), previousReply: reply}
+			err = e.verifiers.Add(hash, md, MaximumCacheValidity*time.Second)
+			if err != nil {
+				log.Printf("Failed to store verification metadata: %v", err)
+			}
+
+			log.Printf("Storing call to %s(%s) for estimation verification", method, reqMessage)
+			e.scheduler <- 5
 		}
 
-		log.Printf("Storing call to %s(%s) for estimation verification", method, reqMessage)
 		return nil
 	}
 }
 
 func (e *ConfigurableValidityEstimator) verifyEstimations() {
-	for method, value := range e.verifiers.Items() {
+	for _, value := range e.verifiers.Items() {
 		md := value.Object.(verifierMetadata)
 		opts := []grpc.DialOption{grpc.WithDefaultCallOptions(), grpc.WithInsecure()}
+
 		cc, err := grpc.Dial(md.target, opts...)
 		if err != nil {
 			log.Printf("Failed to dial %v", err)
 			continue
 		}
+		defer cc.Close()
 
-		var reply interface{}
-		err = cc.Invoke(context.Background(), method, md.req, reply)
+		reply := proto.Clone(md.previousReply.(proto.Message))
+		if err != nil {
+			log.Printf("Failed to make a deep copy of reply object: %v", err)
+			continue
+		}
+		err = cc.Invoke(context.Background(), md.method, md.req, reply)
 		if err != nil {
 			log.Printf("Failed to invoke call over established connection %v", err)
+			continue
 		}
 
-		log.Printf("Verified %s(%s) = %s", method, md.req.(proto.Message).String(), reply.(proto.Message).String())
+		log.Printf("Verified %s(%s)", md.method, md.req.(proto.Message).String())
 	}
 
 	// Run again in 5 seconds time.
