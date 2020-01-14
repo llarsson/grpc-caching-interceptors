@@ -151,7 +151,10 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 		reqMessage := req.(proto.Message)
 		hash := hashcode.Strings([]string{method, reqMessage.String()})
 		md := verifierMetadata{req: req, target: cc.Target(), previousReply: reply}
-		e.verifiers.Add(hash, md, MaximumCacheValidity*time.Second)
+		err = e.verifiers.Add(hash, md, MaximumCacheValidity*time.Second)
+		if err != nil {
+			log.Printf("Failed to store verification metadata: %v", err)
+		}
 
 		log.Printf("Storing call to %s(%s) for estimation verification", method, reqMessage)
 		return nil
