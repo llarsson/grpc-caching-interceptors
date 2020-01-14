@@ -11,7 +11,11 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
+	"github.com/golang/protobuf/proto"
+	"github.com/hashicorp/terraform/helper/hashcode"
+	"github.com/patrickmn/go-cache"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -19,25 +23,62 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const (
+	// MaximumCacheValidity is the highest number of seconds that an object
+	// can be considered valid.
+	MaximumCacheValidity = 300
+)
+
 // A ValidityEstimator hooks into the server side, and performs estimation of
 // how long responses may be stored in cache.
 type ValidityEstimator interface {
 	// EstimateMaxAge estimates how long a given request/response should be
 	// possible to cache (in seconds).
-	EstimateMaxAge(fullMethod string, req interface{}, resp interface{}) (int, error)
+	estimateMaxAge(fullMethod string, req interface{}, resp interface{}) (int, error)
 	// UnaryServerInterceptor returns the gRPC Interceptor for Unary operations
 	// that uses the EstimateMaxAge function on the request/response objects.
 	UnaryServerInterceptor() grpc.UnaryServerInterceptor
+	// UnaryClientInterceptor creates a gRPC Interceptor for outgoing calls,
+	// and is used for capturing information needed to make estimations
+	// more accurate by polling the origin server.
+	UnaryClientInterceptor() grpc.UnaryClientInterceptor
 }
 
 // ConfigurableValidityEstimator is a configurable ValidityEstimator.
 type ConfigurableValidityEstimator struct {
+	verifiers cache.Cache
+	scheduler chan int
 }
 
-// EstimateMaxAge estimates the cache validity of the specified
+// Initialize new ConfigurableValidityEstimator.
+func (e *ConfigurableValidityEstimator) Initialize() {
+	e.verifiers = cache.Cache{}
+	e.scheduler = make(chan int)
+	go func() {
+		delay := 10
+		for {
+			select {
+			case e.scheduler <- delay:
+				time.Sleep(time.Duration(delay) * time.Second)
+				e.verifyEstimations()
+			case <-e.scheduler:
+				return
+			}
+		}
+	}()
+
+}
+
+// Stop the validation process. This can be done only once, as the
+// validation process will not continue.
+func (e *ConfigurableValidityEstimator) Stop() {
+	<-e.scheduler
+}
+
+// estimateMaxAge estimates the cache validity of the specified
 // request/response pair for the given method. The result is given
 // in seconds.
-func (e *ConfigurableValidityEstimator) EstimateMaxAge(fullMethod string, req interface{}, resp interface{}) (int, error) {
+func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req interface{}, resp interface{}) (int, error) {
 	value, present := os.LookupEnv("PROXY_MAX_AGE")
 
 	if !present {
@@ -75,7 +116,7 @@ func (e *ConfigurableValidityEstimator) UnaryServerInterceptor() grpc.UnaryServe
 			return resp, err
 		}
 
-		maxAge, err := e.EstimateMaxAge(info.FullMethod, req, resp)
+		maxAge, err := e.estimateMaxAge(info.FullMethod, req, resp)
 		if err == nil && maxAge > 0 {
 			grpc.SetHeader(ctx, metadata.Pairs("cache-control", fmt.Sprintf("must-revalidate, max-age=%d", maxAge)))
 		}
@@ -84,4 +125,58 @@ func (e *ConfigurableValidityEstimator) UnaryServerInterceptor() grpc.UnaryServe
 
 		return resp, err
 	}
+}
+
+func verificationNeeded(method string, req interface{}) bool {
+	return true
+}
+
+type verifierMetadata struct {
+	req           interface{}
+	target        string
+	previousReply interface{}
+}
+
+// UnaryClientInterceptor catches outgoing calls and stores information
+// about them to enable verification of estimated cache validity
+// times.
+func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+
+		err := invoker(ctx, method, req, reply, cc, opts...)
+		if err != nil {
+			return err
+		}
+
+		reqMessage := req.(proto.Message)
+		hash := hashcode.Strings([]string{method, reqMessage.String()})
+		md := verifierMetadata{req: req, target: cc.Target(), previousReply: reply}
+		e.verifiers.Add(hash, md, MaximumCacheValidity*time.Second)
+
+		log.Printf("Storing call to %s(%s) for estimation verification", method, reqMessage)
+		return nil
+	}
+}
+
+func (e *ConfigurableValidityEstimator) verifyEstimations() {
+	for method, value := range e.verifiers.Items() {
+		md := value.Object.(verifierMetadata)
+		opts := []grpc.DialOption{grpc.WithDefaultCallOptions(), grpc.WithInsecure()}
+		cc, err := grpc.Dial(md.target, opts...)
+		if err != nil {
+			log.Printf("Failed to dial %v", err)
+			continue
+		}
+
+		var reply interface{}
+		err = cc.Invoke(context.Background(), method, md.req, reply)
+		if err != nil {
+			log.Printf("Failed to invoke call over established connection %v", err)
+		}
+
+		log.Printf("Verified %s(%s) = %s", method, md.req.(proto.Message).String(), reply.(proto.Message).String())
+	}
+
+	// Run again in 5 seconds time.
+	e.scheduler <- 5
 }
