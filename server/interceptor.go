@@ -53,21 +53,18 @@ type ConfigurableValidityEstimator struct {
 // Initialize new ConfigurableValidityEstimator.
 func (e *ConfigurableValidityEstimator) Initialize() {
 	e.verifiers = cache.New(time.Duration(MaximumCacheValidity)*time.Second, time.Duration(MaximumCacheValidity)*10*time.Second)
-	e.scheduler = make(chan int)
+	e.scheduler = make(chan int, 3)
 	go func() {
 		for {
-			select {
-			case delay, more := <-e.scheduler:
-				if !more {
-					log.Printf("Closing down verification estimation")
-					return
-				}
-				time.Sleep(time.Duration(delay) * time.Second)
-				e.verifyEstimations()
+			delay, more := <-e.scheduler
+			if !more {
+				log.Printf("Closing down verification estimation")
+				return
 			}
+			time.Sleep(time.Duration(delay) * time.Second)
+			e.verifyEstimations()
 		}
 	}()
-
 }
 
 // Stop the validation process. This can be done only once, as the
@@ -133,10 +130,12 @@ func (e *ConfigurableValidityEstimator) verificationNeeded(method string, req in
 }
 
 type verifierMetadata struct {
-	method        string
-	req           interface{}
-	target        string
-	previousReply interface{}
+	method               string
+	req                  interface{}
+	target               string
+	previousReply        interface{}
+	verificationInterval time.Duration
+	verificationInstant  time.Time
 }
 
 // UnaryClientInterceptor catches outgoing calls and stores information
@@ -153,8 +152,8 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 		if e.verificationNeeded(method, req) {
 			reqMessage := req.(proto.Message)
 			hash := hashcode.Strings([]string{method, reqMessage.String()})
-			md := verifierMetadata{method: method, req: req, target: cc.Target(), previousReply: reply}
-			err = e.verifiers.Add(hash, md, MaximumCacheValidity*time.Second)
+			md := verifierMetadata{method: method, req: req, target: cc.Target(), previousReply: reply, verificationInterval: (5 * time.Second), verificationInstant: time.Now()}
+			err = e.verifiers.Add(hash, md, time.Duration(MaximumCacheValidity)*time.Second)
 			if err != nil {
 				log.Printf("Failed to store verification metadata: %v", err)
 			}
@@ -168,10 +167,15 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 }
 
 func (e *ConfigurableValidityEstimator) verifyEstimations() {
-	for _, value := range e.verifiers.Items() {
+	for key, value := range e.verifiers.Items() {
 		md := value.Object.(verifierMetadata)
-		opts := []grpc.DialOption{grpc.WithDefaultCallOptions(), grpc.WithInsecure()}
 
+		// No estimation needed yet for this object
+		if time.Now().Before(md.verificationInstant.Add(md.verificationInterval)) {
+			continue
+		}
+
+		opts := []grpc.DialOption{grpc.WithDefaultCallOptions(), grpc.WithInsecure()}
 		cc, err := grpc.Dial(md.target, opts...)
 		if err != nil {
 			log.Printf("Failed to dial %v", err)
@@ -179,20 +183,43 @@ func (e *ConfigurableValidityEstimator) verifyEstimations() {
 		}
 		defer cc.Close()
 
-		reply := proto.Clone(md.previousReply.(proto.Message))
-		if err != nil {
-			log.Printf("Failed to make a deep copy of reply object: %v", err)
-			continue
-		}
+		requestMessage := md.req.(proto.Message)
+		previousReplyMessage := md.previousReply.(proto.Message)
+
+		reply := proto.Clone(previousReplyMessage)
 		err = cc.Invoke(context.Background(), md.method, md.req, reply)
 		if err != nil {
 			log.Printf("Failed to invoke call over established connection %v", err)
 			continue
 		}
 
-		log.Printf("Verified %s(%s)", md.method, md.req.(proto.Message).String())
+		verificationRequired, newInterval := verify(previousReplyMessage, reply, md.verificationInterval)
+		log.Printf("Verified %s(%s)", md.method, requestMessage.String())
+		if !verificationRequired {
+			e.verifiers.Delete(key)
+			continue
+		}
+
+		// FIXME(llarsson): There must be something pretty we can do here with
+		// channels or whatnot, s.t. we can schedule these verifications
+		// using such a primitive. It would make it all much nicer and smarter,
+		// since we would not have to loop over the entire set and skip most of
+		// the items every time.
+
+		md.previousReply = reply
+		md.verificationInterval = newInterval
+		md.verificationInstant = time.Now()
+		remaining := time.Duration((value.Expiration - time.Now().UnixNano())) * time.Nanosecond
+		e.verifiers.Replace(key, md, remaining)
+		log.Printf("Object %s(%s) verified again in %s, stays in memory %s", md.method, requestMessage.String(), md.verificationInterval, remaining)
 	}
 
-	// Run again in 5 seconds time.
-	e.scheduler <- 5
+	// Run again in the near future.
+	e.scheduler <- 1
+}
+
+func verify(previousReply proto.Message, currentReply proto.Message, verificationInterval time.Duration) (bool, time.Duration) {
+	// TODO(llarsson): actual verification and smartness goes here :)
+	// TODO(llarsson): logic for determining if more verification is needed
+	return true, verificationInterval
 }
