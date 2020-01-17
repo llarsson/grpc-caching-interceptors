@@ -126,6 +126,13 @@ func (e *ConfigurableValidityEstimator) UnaryServerInterceptor() grpc.UnaryServe
 }
 
 func (e *ConfigurableValidityEstimator) verificationNeeded(method string, req interface{}) bool {
+	hash := hash(method, req)
+	_, expiration, found := e.verifiers.GetWithExpiration(hash)
+	if found {
+		if expiration.IsZero() || time.Now().Before(expiration) {
+			return false
+		}
+	}
 	return true
 }
 
@@ -136,6 +143,13 @@ type verifierMetadata struct {
 	previousReply        interface{}
 	verificationInterval time.Duration
 	verificationInstant  time.Time
+}
+
+func hash(method string, req interface{}) string {
+	reqMessage := req.(proto.Message)
+	hash := hashcode.Strings([]string{method, reqMessage.String()})
+
+	return hash
 }
 
 // UnaryClientInterceptor catches outgoing calls and stores information
@@ -151,11 +165,12 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 
 		if e.verificationNeeded(method, req) {
 			reqMessage := req.(proto.Message)
-			hash := hashcode.Strings([]string{method, reqMessage.String()})
+			hash := hash(method, req)
 			md := verifierMetadata{method: method, req: req, target: cc.Target(), previousReply: reply, verificationInterval: (5 * time.Second), verificationInstant: time.Now()}
 			err = e.verifiers.Add(hash, md, time.Duration(MaximumCacheValidity)*time.Second)
 			if err != nil {
 				log.Printf("Failed to store verification metadata: %v", err)
+				return err
 			}
 
 			log.Printf("Storing call to %s(%s) for estimation verification", method, reqMessage)
