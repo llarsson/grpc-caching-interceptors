@@ -101,9 +101,11 @@ func (v *verifier) fetch() (interface{}, error) {
 	return reply, nil
 }
 
+// estimateMaxAge returns the number of seconds that the current verifier
+// estimates is reasonable to cache response objects. In case of error,
+// the error should be set to something reasonable and descriptive.
 func (v *verifier) estimateMaxAge(response interface{}) (int, error) {
-	// TODO Maybe we should set the response here, too?
-
+	// TODO Obviously, this needs a smarter implementation!
 	value, present := os.LookupEnv("PROXY_MAX_AGE")
 	if !present {
 		// It is not an error to not have the proxy max age key present in environment. We just act as if we were in passthrough mode.
