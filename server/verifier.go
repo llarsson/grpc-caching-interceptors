@@ -70,6 +70,9 @@ func (v *verifier) run() {
 			continue
 		}
 
+		// TODO Refactor here s.t. we always react to new replies in the same way,
+		// regardless of where they came from (i.e. we fetched them or we were
+		// given them via the estimateMaxAge function).
 		newInterval := v.verify(newReply)
 
 		// Prepare for next iteration.
@@ -106,6 +109,12 @@ func (v *verifier) fetch() (interface{}, error) {
 // the error should be set to something reasonable and descriptive.
 func (v *verifier) estimateMaxAge(response interface{}) (int, error) {
 	// TODO Obviously, this needs a smarter implementation!
+
+	// TODO Do we want to react to the incoming "response" parameter?
+	// It is, after all, by definition fresher than the currently stored
+	// most recently automatically fetched value. Perhaps stuff it into
+	// "verify"?
+
 	value, present := os.LookupEnv("PROXY_MAX_AGE")
 	if !present {
 		// It is not an error to not have the proxy max age key present in environment. We just act as if we were in passthrough mode.
@@ -142,5 +151,3 @@ func (v *verifier) verify(newReply interface{}) time.Duration {
 func (v *verifier) String() string {
 	return fmt.Sprintf("%s(%s)", v.metadata.method, v.metadata.req.(proto.Message))
 }
-
-// FIXME The "estimateMaxAge" functionality belongs here!
