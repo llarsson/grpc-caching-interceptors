@@ -26,7 +26,7 @@ import (
 const (
 	// MaximumCacheValidity is the highest number of seconds that an object
 	// can be considered valid.
-	MaximumCacheValidity = 300
+	MaximumCacheValidity = 45
 )
 
 // A ValidityEstimator hooks into the server side, and performs estimation of
@@ -63,8 +63,10 @@ func (e *ConfigurableValidityEstimator) Initialize() {
 			}
 			time.Sleep(time.Duration(delay) * time.Second)
 			e.verifyEstimations()
+			e.scheduler <- 1
 		}
 	}()
+	e.scheduler <- 1
 }
 
 // Stop the validation process. This can be done only once, as the
@@ -130,9 +132,13 @@ func (e *ConfigurableValidityEstimator) verificationNeeded(method string, req in
 	_, expiration, found := e.verifiers.GetWithExpiration(hash)
 	if found {
 		if expiration.IsZero() || time.Now().Before(expiration) {
+			log.Printf("Verification of object %s not needed, object not expired yet (%s)", hash, expiration)
 			return false
 		}
+		log.Printf("Object %s found, but expired. Verification needed.", hash)
+		return true
 	}
+	log.Printf("Object %s not found, verification needed", hash)
 	return true
 }
 
@@ -174,7 +180,8 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 			}
 
 			log.Printf("Storing call to %s(%s) for estimation verification", method, reqMessage)
-			e.scheduler <- 5
+		} else {
+			log.Printf("No verification for call to %s(%s) needed", method, req.(proto.Message))
 		}
 
 		return nil
@@ -228,9 +235,6 @@ func (e *ConfigurableValidityEstimator) verifyEstimations() {
 		e.verifiers.Replace(key, md, remaining)
 		log.Printf("Object %s(%s) verified again in %s, stays in memory %s", md.method, requestMessage.String(), md.verificationInterval, remaining)
 	}
-
-	// Run again in the near future.
-	e.scheduler <- 1
 }
 
 func verify(previousReply proto.Message, currentReply proto.Message, verificationInterval time.Duration) (bool, time.Duration) {
