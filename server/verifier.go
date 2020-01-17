@@ -30,6 +30,11 @@ type verifier struct {
 	done     chan string
 }
 
+// String is a string representation of a given verifier.
+func (v *verifier) String() string {
+	return fmt.Sprintf("%s(%s)", v.metadata.method, v.metadata.req.(proto.Message))
+}
+
 // newVerifier creates a new verifier and starts its goroutine. It attempts
 // to establish a grpc.ClientConn to the upstream service. If that fails,
 // an error is returned.
@@ -145,9 +150,4 @@ func (v *verifier) estimateMaxAge(response interface{}) (int, error) {
 func (v *verifier) verify(newReply interface{}) time.Duration {
 	// TODO Actual smartness goes here!
 	return time.Duration(5 * time.Second)
-}
-
-// String is a string representation of this verifier.
-func (v *verifier) String() string {
-	return fmt.Sprintf("%s(%s)", v.metadata.method, v.metadata.req.(proto.Message))
 }
