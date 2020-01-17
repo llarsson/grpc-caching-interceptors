@@ -9,8 +9,6 @@ package server
 import (
 	"fmt"
 	"log"
-	"os"
-	"strconv"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -18,9 +16,7 @@ import (
 	"github.com/patrickmn/go-cache"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -62,6 +58,7 @@ func (e *ConfigurableValidityEstimator) Initialize() {
 	go func() {
 		for {
 			finishedVerifier := <-e.done
+			log.Printf("Verifier %s finished (currently %d) in set", finishedVerifier, e.verifiers.ItemCount())
 			e.verifiers.Delete(finishedVerifier)
 		}
 	}()
@@ -71,30 +68,16 @@ func (e *ConfigurableValidityEstimator) Initialize() {
 // request/response pair for the given method. The result is given
 // in seconds.
 func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req interface{}, resp interface{}) (int, error) {
-	value, present := os.LookupEnv("PROXY_MAX_AGE")
+	value, found := e.verifiers.Get(hash(fullMethod, req))
+	verifier := value.(*verifier)
 
-	if !present {
-		// It is not an error to not have the proxy max age key present in environment. We just act as if we were in passthrough mode.
-		return -1, nil
+	if found {
+		return verifier.estimateMaxAge(resp)
 	}
 
-	switch value {
-	case "dynamic":
-		{
-			return -1, status.Errorf(codes.Unimplemented, "Dynamic validity not implemented yet")
-		}
-	case "passthrough":
-		{
-			return -1, nil
-		}
-	default:
-		maxAge, err := strconv.Atoi(value)
-		if err != nil {
-			log.Printf("Failed to parse PROXY_MAX_AGE (%s) into integer", value)
-			return -1, err
-		}
-		return maxAge, nil
-	}
+	// No estimation at this time is not an error. But that means that caching
+	// should not occur, either.
+	return 0, nil
 }
 
 // UnaryServerInterceptor creates the server-side gRPC Unary Interceptor
@@ -113,7 +96,7 @@ func (e *ConfigurableValidityEstimator) UnaryServerInterceptor() grpc.UnaryServe
 			grpc.SetHeader(ctx, metadata.Pairs("cache-control", fmt.Sprintf("must-revalidate, max-age=%d", maxAge)))
 		}
 
-		log.Printf("%s hit upstream and maxAge set to %d", info.FullMethod, maxAge)
+		log.Printf("%s hit upstream and cache max-age set to %d", info.FullMethod, maxAge)
 
 		return resp, err
 	}
@@ -176,7 +159,8 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 				log.Printf("Unable to create verifier: %v", err)
 			}
 
-			err = e.verifiers.Add(hash, verifier, expiration)
+			// expiration is manually handled by our use of the "done" channel
+			err = e.verifiers.Add(hash, verifier, time.Duration(0))
 			if err != nil {
 				log.Printf("Failed to store verifier: %v", err)
 				return err
@@ -190,59 +174,3 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 		return nil
 	}
 }
-
-// func (e *ConfigurableValidityEstimator) verifyEstimations() {
-// 	for key, value := range e.verifiers.Items() {
-// 		md := value.Object.(verifierMetadata)
-//
-// 		// No estimation needed yet for this object
-// 		if time.Now().Before(md.timestamp.Add(md.interval)) {
-// 			continue
-// 		}
-//
-// 		opts := []grpc.DialOption{grpc.WithDefaultCallOptions(), grpc.WithInsecure()}
-// 		cc, err := grpc.Dial(md.target, opts...)
-// 		if err != nil {
-// 			log.Printf("Failed to dial %v", err)
-// 			continue
-// 		}
-// 		defer cc.Close()
-//
-// 		requestMessage := md.req.(proto.Message)
-// 		previousReplyMessage := md.previousReply.(proto.Message)
-//
-// 		reply := proto.Clone(previousReplyMessage)
-// 		err = cc.Invoke(context.Background(), md.method, md.req, reply)
-// 		if err != nil {
-// 			log.Printf("Failed to invoke call over established connection %v", err)
-// 			continue
-// 		}
-//
-// 		verificationRequired, newInterval := verify(previousReplyMessage, reply, md.interval)
-// 		log.Printf("Verified %s(%s)", md.method, requestMessage.String())
-// 		if !verificationRequired {
-// 			e.verifiers.Delete(key)
-// 			continue
-// 		}
-//
-// 		// FIXME(llarsson): There must be something pretty we can do here with
-// 		// channels or whatnot, s.t. we can schedule these verifications
-// 		// using such a primitive. It would make it all much nicer and smarter,
-// 		// since we would not have to loop over the entire set and skip most of
-// 		// the items every time.
-//
-// 		md.previousReply = reply
-// 		md.interval = newInterval
-// 		md.timestamp = time.Now()
-// 		remaining := time.Duration((value.Expiration - time.Now().UnixNano())) * time.Nanosecond
-// 		e.verifiers.Replace(key, md, remaining)
-// 		log.Printf("Object %s(%s) verified again in %s, stays in memory %s", md.method, requestMessage.String(), md.interval, remaining)
-// 	}
-// }
-//
-// func verify(previousReply proto.Message, currentReply proto.Message, verificationInterval time.Duration) (bool, time.Duration) {
-// 	// TODO(llarsson): actual verification and smartness goes here :)
-// 	// TODO(llarsson): logic for determining if more verification is needed
-// 	return true, verificationInterval
-// }
-//

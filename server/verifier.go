@@ -3,11 +3,15 @@ package server
 import (
 	"fmt"
 	"log"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type verifierMetadata struct {
@@ -95,6 +99,34 @@ func (v *verifier) fetch() (interface{}, error) {
 	}
 
 	return reply, nil
+}
+
+func (v *verifier) estimateMaxAge(response interface{}) (int, error) {
+	// TODO Maybe we should set the response here, too?
+
+	value, present := os.LookupEnv("PROXY_MAX_AGE")
+	if !present {
+		// It is not an error to not have the proxy max age key present in environment. We just act as if we were in passthrough mode.
+		return -1, nil
+	}
+
+	switch value {
+	case "dynamic":
+		{
+			return -1, status.Errorf(codes.Unimplemented, "Dynamic validity not implemented yet")
+		}
+	case "passthrough":
+		{
+			return -1, nil
+		}
+	default:
+		maxAge, err := strconv.Atoi(value)
+		if err != nil {
+			log.Printf("Failed to parse PROXY_MAX_AGE (%s) into integer", value)
+			return -1, err
+		}
+		return maxAge, nil
+	}
 }
 
 // verify the new reply against the old one and return the duration until
