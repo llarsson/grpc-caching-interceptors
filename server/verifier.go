@@ -24,13 +24,18 @@ type estimation struct {
 	timestamp time.Time
 }
 
+type interval struct {
+	duration  time.Duration
+	timestamp time.Time
+}
+
 type verifier struct {
 	target     string
 	method     string
 	req        proto.Message
 	expiration time.Time
 
-	interval      time.Duration
+	intervals     []interval
 	verifications []verification
 	cc            *grpc.ClientConn
 	estimations   []estimation
@@ -59,7 +64,7 @@ func newVerifier(target string, method string, req proto.Message, resp proto.Mes
 		req:        req,
 		expiration: expiration,
 
-		interval:      time.Duration(5 * time.Second),
+		intervals:     make([]interval, 0),
 		verifications: make([]verification, 0),
 		estimations:   make([]estimation, 0),
 		cc:            cc,
@@ -85,9 +90,10 @@ func (v *verifier) run() {
 	defer v.cc.Close()
 
 	for {
-		log.Printf("%s scheduled for verification in %s (expires %s)", v.String(), v.interval, v.expiration)
+		delay := v.intervals[len(v.intervals)-1].duration
+		log.Printf("%s scheduled for verification in %s (expires %s)", v.String(), delay, v.expiration)
 
-		time.Sleep(v.interval)
+		time.Sleep(delay)
 
 		if v.finished() {
 			log.Printf("%s needs no further verification", v.String())
@@ -120,7 +126,7 @@ func (v *verifier) update(reply proto.Message) error {
 	v.verifications = append(v.verifications, verification{reply: proto.Clone(reply), timestamp: now})
 
 	// update estimations
-	estimate, interval, err := v.estimate()
+	estimate, verificationInterval, err := v.estimate()
 	if err != nil {
 		log.Printf("Error estimating for %s <- %s", v.String(), reply)
 		return err
@@ -128,7 +134,7 @@ func (v *verifier) update(reply proto.Message) error {
 	v.estimations = append(v.estimations, estimation{validity: estimate, timestamp: now})
 
 	// update sleep interval
-	v.interval = interval
+	v.intervals = append(v.intervals, interval{duration: verificationInterval, timestamp: now})
 
 	// FIXME Should we need to interrupt the sleeping goroutine, or do we not care?
 
