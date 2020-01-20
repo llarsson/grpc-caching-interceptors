@@ -72,7 +72,18 @@ func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req in
 	verifier := value.(*verifier)
 
 	if found {
-		return verifier.estimateMaxAge(resp)
+		err := verifier.update(resp.(proto.Message))
+		if err != nil {
+			log.Printf("Unable to update verifier %s", verifier.String())
+			return -1, err
+		}
+
+		maxAge, _, err := verifier.estimate()
+		if err != nil {
+			return -1, err
+		}
+
+		return maxAge, nil
 	}
 
 	// No estimation at this time is not an error. But that means that caching
@@ -140,21 +151,12 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 			return err
 		}
 
-		if needed, interval := e.verificationNeeded(method, req); needed {
+		if needed, _ := e.verificationNeeded(method, req); needed {
 			hash := hash(method, req)
 			expiration := time.Duration(MaximumCacheValidity) * time.Second
 			now := time.Now()
-			md := verifierMetadata{
-				method:        method,
-				req:           req,
-				target:        cc.Target(),
-				previousReply: reply,
-				interval:      (time.Duration(interval) * time.Second),
-				timestamp:     now,
-				expiration:    now.Add(expiration),
-			}
 
-			verifier, err := newVerifier(md, e.done)
+			verifier, err := newVerifier(cc.Target(), method, req.(proto.Message), reply.(proto.Message), now.Add(expiration), e.done)
 			if err != nil {
 				log.Printf("Unable to create verifier: %v", err)
 			}
