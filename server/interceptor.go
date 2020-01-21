@@ -9,6 +9,8 @@ package server
 import (
 	"fmt"
 	"log"
+	"os"
+	"regexp"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -69,9 +71,9 @@ func (e *ConfigurableValidityEstimator) Initialize() {
 // in seconds.
 func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req interface{}, resp interface{}) (int, error) {
 	value, found := e.verifiers.Get(hash(fullMethod, req))
-	verifier := value.(*verifier)
 
 	if found {
+		verifier := value.(*verifier)
 		err := verifier.update(resp.(proto.Message))
 		if err != nil {
 			log.Printf("Unable to update verifier %s", verifier.String())
@@ -119,6 +121,14 @@ func (e *ConfigurableValidityEstimator) verificationNeeded(method string, req in
 	// the verification process a bit, keeping the number of verifiers
 	// down.
 
+	if blacklistExpression, found := os.LookupEnv("PROXY_CACHE_BLACKLIST"); found {
+		blacklisted, err := regexp.Match(blacklistExpression, []byte(method))
+		if err == nil && blacklisted {
+			log.Printf("Method %s blacklisted from caching.", method)
+			return false, -1
+		}
+	}
+
 	hash := hash(method, req)
 	_, expiration, found := e.verifiers.GetWithExpiration(hash)
 	if found {
@@ -127,10 +137,10 @@ func (e *ConfigurableValidityEstimator) verificationNeeded(method string, req in
 			return false, -1
 		}
 		log.Printf("Object %s found, but expired. Verification needed.", hash)
-		return true, 5
+		return true, MaximumCacheValidity
 	}
 	log.Printf("Object %s not found, verification needed", hash)
-	return true, 5
+	return true, MaximumCacheValidity
 }
 
 func hash(method string, req interface{}) string {
@@ -151,12 +161,11 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 			return err
 		}
 
-		if needed, _ := e.verificationNeeded(method, req); needed {
+		if needed, expiration := e.verificationNeeded(method, req); needed {
 			hash := hash(method, req)
-			expiration := time.Duration(MaximumCacheValidity) * time.Second
 			now := time.Now()
 
-			verifier, err := newVerifier(cc.Target(), method, req.(proto.Message), reply.(proto.Message), now.Add(expiration), e.done)
+			verifier, err := newVerifier(cc.Target(), method, req.(proto.Message), reply.(proto.Message), now.Add(time.Duration(expiration)*time.Second), e.done)
 			if err != nil {
 				log.Printf("Unable to create verifier: %v", err)
 			}
