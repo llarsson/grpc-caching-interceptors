@@ -102,7 +102,7 @@ func (v *verifier) run() {
 
 		newReply, err := v.fetch()
 		if err != nil {
-			log.Printf("Upstream fetch failed: %v", err)
+			log.Printf("Upstream fetch %s failed: %v", v.String(), err)
 			continue
 		}
 

@@ -4,6 +4,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -53,7 +54,7 @@ func (interceptor *InmemoryCachingInterceptor) UnaryServerInterceptor() grpc.Una
 
 		resp, err := handler(ctx, req)
 		if err != nil {
-			log.Printf("Failed to call upstream %s", info.FullMethod)
+			log.Printf("Failed to call upstream %s(%s): %v", info.FullMethod, req, err)
 			return nil, err
 		}
 
@@ -79,14 +80,16 @@ func (interceptor *InmemoryCachingInterceptor) UnaryClientInterceptor() grpc.Una
 			return err
 		}
 
+		cacheStatus := "response not stored"
+
 		expiration, _ := cacheExpiration(header.Get("cache-control"))
 		if expiration > 0 {
 			interceptor.Cache.Set(hash, reply, time.Duration(expiration)*time.Second)
-			log.Printf("Storing response for %d seconds", expiration)
+			cacheStatus = fmt.Sprintf("response stored %d seconds", expiration)
 		}
 
 		grpc.SendHeader(ctx, metadata.Pairs("x-cache", "miss"))
-		log.Printf("Fetched upstream response for call to %s(%s)", method, req)
+		log.Printf("Fetched upstream response for call to %s(%s) (%s)", method, req, cacheStatus)
 		return nil
 	}
 }

@@ -133,13 +133,13 @@ func (e *ConfigurableValidityEstimator) verificationNeeded(method string, req in
 	_, expiration, found := e.verifiers.GetWithExpiration(hash)
 	if found {
 		if expiration.IsZero() || time.Now().Before(expiration) {
-			log.Printf("Verification of object %s not needed, object not expired yet (%s)", hash, expiration)
+			log.Printf("Verification of object %s = %s(%s) not needed, object not expired yet (%s)", hash, method, req, expiration)
 			return false, -1
 		}
-		log.Printf("Object %s found, but expired. Verification needed.", hash)
+		log.Printf("Object %s = %s(%s) found, but expired. Verification needed.", hash, method, req)
 		return true, MaximumCacheValidity
 	}
-	log.Printf("Object %s not found, verification needed", hash)
+	log.Printf("Object %s = %s(%s) not found, verification needed", hash, method, req)
 	return true, MaximumCacheValidity
 }
 
@@ -158,6 +158,7 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 		// TODO(llarsson): store headers as well
 		err := invoker(ctx, method, req, reply, cc, opts...)
 		if err != nil {
+			log.Printf("Failure to invoke upstream %s(%s): %v", method, req, err)
 			return err
 		}
 
@@ -167,19 +168,18 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 
 			verifier, err := newVerifier(cc.Target(), method, req.(proto.Message), reply.(proto.Message), now.Add(time.Duration(expiration)*time.Second), e.done)
 			if err != nil {
-				log.Printf("Unable to create verifier: %v", err)
+				log.Printf("Unable to create verifier for %s(%s): %v", method, req, err)
+				return err
 			}
 
 			// expiration is manually handled by our use of the "done" channel
 			err = e.verifiers.Add(hash, verifier, time.Duration(0))
 			if err != nil {
-				log.Printf("Failed to store verifier: %v", err)
+				log.Printf("Failed to store verifier for %s: %v", verifier.String(), err)
 				return err
 			}
 
 			log.Printf("Stored %s for verification", verifier.String())
-		} else {
-			log.Printf("No verification for call to %s(%s) needed", method, req.(proto.Message))
 		}
 
 		return nil
