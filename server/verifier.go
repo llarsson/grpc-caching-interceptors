@@ -229,5 +229,20 @@ func (v *verifier) determineEstimation() (int, error) {
 	// Here, we can use v.estimates and v.verifications, but we should not modify them.
 	// That housekeeping is done elsewhere.
 
-	return -1, status.Errorf(codes.Unimplemented, "Dynamic validity not implemented yet")
+	// How long have we had the same result?
+	lastVerification := v.verifications[len(v.verifications)-1]
+
+	var oldestVerification verification
+	for i := len(v.verifications) - 1; i >= 0; i-- {
+		if proto.Equal(v.verifications[i].reply, lastVerification.reply) {
+			oldestVerification = v.verifications[i]
+		} else {
+			break // we no longer match, might as well quit early...
+		}
+	}
+	unchanged := int(lastVerification.timestamp.Sub(oldestVerification.timestamp).Seconds())
+	log.Printf("Value for %s unchanged for %d seconds", v.String(), unchanged)
+
+	// claim that the TTL is half of the observed "unchanged" interval
+	return unchanged / 2, nil
 }
