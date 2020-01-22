@@ -34,12 +34,19 @@ type verifier struct {
 	method     string
 	req        proto.Message
 	expiration time.Time
+	strategy   estimationStrategy
 
 	intervals     []interval
 	verifications []verification
 	cc            *grpc.ClientConn
 	estimations   []estimation
 	done          chan string
+}
+
+type estimationStrategy interface {
+	initialize()
+	determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error)
+	determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error)
 }
 
 // String is a string representation of a given verifier.
@@ -50,7 +57,7 @@ func (v *verifier) String() string {
 // newVerifier creates a new verifier and starts its goroutine. It attempts
 // to establish a grpc.ClientConn to the upstream service. If that fails,
 // an error is returned.
-func newVerifier(target string, method string, req proto.Message, resp proto.Message, expiration time.Time, done chan string) (*verifier, error) {
+func newVerifier(target string, method string, req proto.Message, resp proto.Message, expiration time.Time, strategy estimationStrategy, done chan string) (*verifier, error) {
 	opts := []grpc.DialOption{grpc.WithDefaultCallOptions(), grpc.WithInsecure()}
 	cc, err := grpc.Dial(target, opts...)
 	if err != nil {
@@ -63,6 +70,7 @@ func newVerifier(target string, method string, req proto.Message, resp proto.Mes
 		method:     method,
 		req:        req,
 		expiration: expiration,
+		strategy:   strategy,
 
 		intervals:     make([]interval, 0),
 		verifications: make([]verification, 0),
@@ -180,7 +188,7 @@ func (v *verifier) estimate() (estimatedMaxAge int, verificationInterval time.Du
 		return -1, time.Duration(0), err
 	}
 
-	verificationInterval, err = v.determineInterval()
+	verificationInterval, err = v.strategy.determineInterval(&v.intervals, &v.verifications, &v.estimations)
 	if err != nil {
 		log.Printf("Failed to determine verification interval for %s", v.String())
 		return -1, time.Duration(0), err
@@ -200,7 +208,12 @@ func (v *verifier) produceEstimation() (estimate int, err error) {
 	switch value {
 	case "dynamic":
 		{
-			return v.determineEstimation()
+			dur, err := v.strategy.determineEstimation(&v.intervals, &v.verifications, &v.estimations)
+			if err != nil {
+				log.Printf("Failed to estimate max-age for %s due to %v", v.String(), err)
+				return -1, err
+			}
+			return int(dur.Seconds()), nil
 		}
 	case "passthrough":
 		{
@@ -214,35 +227,4 @@ func (v *verifier) produceEstimation() (estimate int, err error) {
 		}
 		return maxAge, nil
 	}
-}
-
-func (v *verifier) determineInterval() (time.Duration, error) {
-	// TODO Actual smartness goes here!
-	// Here, we can use v.estimates and v.verifications, but we should not modify them.
-	// That housekeeping is done elsewhere.
-
-	return time.Duration(5 * time.Second), nil
-}
-
-func (v *verifier) determineEstimation() (int, error) {
-	// TODO Actual smartness goes here!
-	// Here, we can use v.estimates and v.verifications, but we should not modify them.
-	// That housekeeping is done elsewhere.
-
-	// How long have we had the same result?
-	lastVerification := v.verifications[len(v.verifications)-1]
-
-	var oldestVerification verification
-	for i := len(v.verifications) - 1; i >= 0; i-- {
-		if proto.Equal(v.verifications[i].reply, lastVerification.reply) {
-			oldestVerification = v.verifications[i]
-		} else {
-			break // we no longer match, might as well quit early...
-		}
-	}
-	unchanged := int(lastVerification.timestamp.Sub(oldestVerification.timestamp).Seconds())
-	log.Printf("Value for %s unchanged for %d seconds", v.String(), unchanged)
-
-	// claim that the TTL is half of the observed "unchanged" interval
-	return unchanged / 2, nil
 }

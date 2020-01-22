@@ -166,7 +166,8 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 			hash := hash(method, req)
 			now := time.Now()
 
-			verifier, err := newVerifier(cc.Target(), method, req.(proto.Message), reply.(proto.Message), now.Add(time.Duration(expiration)*time.Second), e.done)
+			strategy := initializeStrategy()
+			verifier, err := newVerifier(cc.Target(), method, req.(proto.Message), reply.(proto.Message), now.Add(time.Duration(expiration)*time.Second), strategy, e.done)
 			if err != nil {
 				log.Printf("Unable to create verifier for %s(%s): %v", method, req, err)
 				return err
@@ -184,4 +185,26 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 
 		return nil
 	}
+}
+
+func initializeStrategy() estimationStrategy {
+	var strategy estimationStrategy
+
+	name, found := os.LookupEnv("PROXY_ESTIMATION_STRATEGY")
+
+	if !found {
+		log.Printf("PROXY_ESTIMATION_STRATEGY not set, using simplistic")
+		strategy = &simplisticStrategy{}
+	} else {
+		switch name {
+		case "simplistic":
+			strategy = &simplisticStrategy{}
+		default:
+			log.Printf("Unknown PROXY_ESTIMATION_STRATEGY=%s specified, using simplistic", name)
+			strategy = &simplisticStrategy{}
+		}
+	}
+
+	strategy.initialize()
+	return strategy
 }
