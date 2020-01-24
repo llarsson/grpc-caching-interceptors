@@ -58,8 +58,8 @@ func (e *ConfigurableValidityEstimator) Initialize(csvLog *log.Logger) {
 	e.verifiers = cache.New(time.Duration(MaximumCacheValidity)*time.Second, time.Duration(MaximumCacheValidity)*10*time.Second)
 	e.done = make(chan string, 1000)
 	e.csvLog = csvLog
-
 	e.csvLog.Printf("timestamp,source,method\n")
+
 	// clean up finished verifiers
 	go func() {
 		for {
@@ -160,7 +160,7 @@ func hash(method string, req interface{}) string {
 // UnaryClientInterceptor catches outgoing calls and stores information
 // about them to enable verification of estimated cache validity
 // times.
-func (e *ConfigurableValidityEstimator) UnaryClientInterceptor(csvLog *log.Logger) grpc.UnaryClientInterceptor {
+func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		// TODO(llarsson): store headers as well
 		err := invoker(ctx, method, req, reply, cc, opts...)
@@ -174,7 +174,7 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor(csvLog *log.Logge
 			now := time.Now()
 
 			strategy := initializeStrategy()
-			verifier, err := newVerifier(cc.Target(), method, req.(proto.Message), reply.(proto.Message), now.Add(time.Duration(expiration)*time.Second), strategy, csvLog, e.done)
+			verifier, err := newVerifier(cc.Target(), method, req.(proto.Message), reply.(proto.Message), now.Add(time.Duration(expiration)*time.Second), strategy, e.csvLog, e.done)
 			if err != nil {
 				log.Printf("Unable to create verifier for %s(%s): %v", method, req, err)
 				return err
