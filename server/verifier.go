@@ -41,6 +41,8 @@ type verifier struct {
 	cc            *grpc.ClientConn
 	estimations   []estimation
 	done          chan string
+
+	csvLog *log.Logger
 }
 
 type estimationStrategy interface {
@@ -57,7 +59,7 @@ func (v *verifier) String() string {
 // newVerifier creates a new verifier and starts its goroutine. It attempts
 // to establish a grpc.ClientConn to the upstream service. If that fails,
 // an error is returned.
-func newVerifier(target string, method string, req proto.Message, resp proto.Message, expiration time.Time, strategy estimationStrategy, done chan string) (*verifier, error) {
+func newVerifier(target string, method string, req proto.Message, resp proto.Message, expiration time.Time, strategy estimationStrategy, csvLog *log.Logger, done chan string) (*verifier, error) {
 	opts := []grpc.DialOption{grpc.WithDefaultCallOptions(), grpc.WithInsecure()}
 	cc, err := grpc.Dial(target, opts...)
 	if err != nil {
@@ -76,6 +78,8 @@ func newVerifier(target string, method string, req proto.Message, resp proto.Mes
 		verifications: make([]verification, 0),
 		estimations:   make([]estimation, 0),
 		cc:            cc,
+
+		csvLog: csvLog,
 
 		done: done,
 	}
@@ -162,6 +166,8 @@ func (v *verifier) fetch() (proto.Message, error) {
 		log.Printf("Failed to invoke call over established connection %v", err)
 		return nil, err
 	}
+
+	v.csvLog.Printf("%d,verifier,%s(%s)\n", time.Now().UnixNano(), v.method, v.req)
 
 	return reply, nil
 }

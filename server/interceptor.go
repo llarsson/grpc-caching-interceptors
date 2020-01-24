@@ -49,13 +49,17 @@ type ConfigurableValidityEstimator struct {
 	verifiers *cache.Cache
 	// A channel where verifiers can specify their ID as being done.
 	done chan string
+	// Where to log CSV records
+	csvLog *log.Logger
 }
 
 // Initialize new ConfigurableValidityEstimator.
-func (e *ConfigurableValidityEstimator) Initialize() {
+func (e *ConfigurableValidityEstimator) Initialize(csvLog *log.Logger) {
 	e.verifiers = cache.New(time.Duration(MaximumCacheValidity)*time.Second, time.Duration(MaximumCacheValidity)*10*time.Second)
 	e.done = make(chan string, 1000)
+	e.csvLog = csvLog
 
+	e.csvLog.Printf("timestamp,source,method\n")
 	// clean up finished verifiers
 	go func() {
 		for {
@@ -74,6 +78,7 @@ func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req in
 
 	if found {
 		verifier := value.(*verifier)
+		e.csvLog.Printf("%d,client,%s(%s)\n", time.Now().UnixNano(), verifier.method, verifier.req)
 		err := verifier.update(resp.(proto.Message))
 		if err != nil {
 			log.Printf("Unable to update verifier %s", verifier.String())
@@ -96,11 +101,9 @@ func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req in
 // UnaryServerInterceptor creates the server-side gRPC Unary Interceptor
 // that is used to inject the cache-control header and the estimated
 // maximum age of the response object.
-func (e *ConfigurableValidityEstimator) UnaryServerInterceptor(csvFile *os.File) grpc.UnaryServerInterceptor {
-	fmt.Fprintf(csvFile, "timestamp,method\n")
+func (e *ConfigurableValidityEstimator) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		fmt.Fprintf(csvFile, "%d,%s(%s)\n", time.Now().UnixNano(), info.FullMethod, req)
 
 		resp, err := handler(ctx, req)
 		if err != nil {
@@ -157,7 +160,7 @@ func hash(method string, req interface{}) string {
 // UnaryClientInterceptor catches outgoing calls and stores information
 // about them to enable verification of estimated cache validity
 // times.
-func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClientInterceptor {
+func (e *ConfigurableValidityEstimator) UnaryClientInterceptor(csvLog *log.Logger) grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		// TODO(llarsson): store headers as well
 		err := invoker(ctx, method, req, reply, cc, opts...)
@@ -171,7 +174,7 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 			now := time.Now()
 
 			strategy := initializeStrategy()
-			verifier, err := newVerifier(cc.Target(), method, req.(proto.Message), reply.(proto.Message), now.Add(time.Duration(expiration)*time.Second), strategy, e.done)
+			verifier, err := newVerifier(cc.Target(), method, req.(proto.Message), reply.(proto.Message), now.Add(time.Duration(expiration)*time.Second), strategy, csvLog, e.done)
 			if err != nil {
 				log.Printf("Unable to create verifier for %s(%s): %v", method, req, err)
 				return err
