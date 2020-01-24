@@ -96,8 +96,12 @@ func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req in
 // UnaryServerInterceptor creates the server-side gRPC Unary Interceptor
 // that is used to inject the cache-control header and the estimated
 // maximum age of the response object.
-func (e *ConfigurableValidityEstimator) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
+func (e *ConfigurableValidityEstimator) UnaryServerInterceptor(csvFile *os.File) grpc.UnaryServerInterceptor {
+	fmt.Fprintf(csvFile, "timestamp,method\n")
+
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		fmt.Fprintf(csvFile, "%d,%s(%s)\n", time.Now().UnixNano(), info.FullMethod, req)
+
 		resp, err := handler(ctx, req)
 		if err != nil {
 			log.Printf("Upstream call failed with error %v", err)
