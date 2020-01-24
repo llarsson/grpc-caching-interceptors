@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -42,8 +41,8 @@ type InmemoryCachingInterceptor struct {
 // response is already in cache, and if so, it just responds with it. If
 // no such response is found, the call is allowed to continue as usual,
 // via a client call (which should be intercepted also).
-func (interceptor *InmemoryCachingInterceptor) UnaryServerInterceptor(csvFile *os.File) grpc.UnaryServerInterceptor {
-	fmt.Fprintf(csvFile, "timestamp,source,method,response\n")
+func (interceptor *InmemoryCachingInterceptor) UnaryServerInterceptor(csvLog *log.Logger) grpc.UnaryServerInterceptor {
+	csvLog.Printf("timestamp,source,method,response\n")
 
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		reqMessage := req.(proto.Message)
@@ -52,9 +51,7 @@ func (interceptor *InmemoryCachingInterceptor) UnaryServerInterceptor(csvFile *o
 		if value, found := interceptor.Cache.Get(hash); found {
 			grpc.SendHeader(ctx, metadata.Pairs("x-cache", "hit"))
 			log.Printf("Using cached response for call to %s(%s)", info.FullMethod, req)
-			if csvFile != nil {
-				fmt.Fprintf(csvFile, "%d,cache,%s(%s),%s\n", time.Now().UnixNano(), info.FullMethod, reqMessage, value)
-			}
+			csvLog.Printf("%d,cache,%s(%s),%s\n", time.Now().UnixNano(), info.FullMethod, reqMessage, value)
 			return value, nil
 		}
 
@@ -64,9 +61,7 @@ func (interceptor *InmemoryCachingInterceptor) UnaryServerInterceptor(csvFile *o
 			return nil, err
 		}
 
-		if csvFile != nil {
-			fmt.Fprintf(csvFile, "%d,upstream,%s(%s),%s\n", time.Now().UnixNano(), info.FullMethod, reqMessage, resp)
-		}
+		csvLog.Printf("%d,upstream,%s(%s),%s\n", time.Now().UnixNano(), info.FullMethod, reqMessage, resp)
 
 		return resp, nil
 	}
