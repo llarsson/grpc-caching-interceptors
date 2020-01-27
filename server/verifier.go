@@ -113,6 +113,11 @@ func (v verifier) run() {
 	defer v.cc.Close()
 
 	for {
+		if len(v.intervals) == 0 {
+			time.Sleep(time.Duration(500 * time.Millisecond))
+			continue
+		}
+
 		delay := v.intervals[len(v.intervals)-1].duration
 		log.Printf("%s scheduled for verification in %s (expires %s)", v.String(), delay, v.expiration)
 
