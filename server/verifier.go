@@ -20,7 +20,7 @@ type verification struct {
 }
 
 type estimation struct {
-	validity  int
+	validity  time.Duration
 	timestamp time.Time
 }
 
@@ -51,19 +51,20 @@ type estimationStrategy interface {
 	determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error)
 }
 
-var _ Verifier = verifier{}
+var _ Verifier = (*verifier)(nil)
 
-func (v verifier) logEstimation(log *log.Logger, source string) error {
-	estimation, err := v.estimateMaxAge()
-	if err != nil {
-		return err
+func (v *verifier) logEstimation(log *log.Logger, source string) error {
+	if len(v.estimations) > 0 {
+		estimation := v.estimations[len(v.estimations)-1]
+		log.Printf("%d,%s,%s,%d\n", time.Now().UnixNano(), v.String(), source, int(estimation.validity.Seconds()))
+		return nil
 	}
-	log.Printf("%d,%s,%s,%d\n", time.Now().UnixNano(), v.String(), source, estimation)
-	return nil
+
+	return status.Errorf(codes.Internal, "No estimation to print")
 }
 
 // String is a string representation of a given verifier.
-func (v verifier) String() string {
+func (v *verifier) String() string {
 	return fmt.Sprintf("%s(%s)", v.method, v.req)
 }
 
@@ -107,7 +108,7 @@ func newVerifier(target string, method string, req proto.Message, resp proto.Mes
 }
 
 // run the verifier goroutine.
-func (v verifier) run() {
+func (v *verifier) run() {
 	// good housekeeping to close the grpc.ClientConn when this goroutine
 	// finishes.
 	defer v.cc.Close()
@@ -143,7 +144,7 @@ func (v verifier) run() {
 }
 
 // update internal data structures and estimations based on new data.
-func (v verifier) update(reply proto.Message) error {
+func (v *verifier) update(reply proto.Message) error {
 	if v.finished() {
 		return status.Errorf(codes.Internal, "Verifier %s finished, cannot be updated anymore", v.String())
 	}
@@ -170,12 +171,12 @@ func (v verifier) update(reply proto.Message) error {
 }
 
 // finished is a predicate that indicates if this verifier has completed its work.
-func (v verifier) finished() bool {
+func (v *verifier) finished() bool {
 	return time.Now().After(v.expiration)
 }
 
 // fetch new reply from upstream service.
-func (v verifier) fetch() (proto.Message, error) {
+func (v *verifier) fetch() (proto.Message, error) {
 	reply := proto.Clone(v.verifications[0].reply)
 	err := v.cc.Invoke(context.Background(), v.method, v.req, reply)
 	if err != nil {
@@ -183,27 +184,17 @@ func (v verifier) fetch() (proto.Message, error) {
 		return nil, err
 	}
 
-	v.logEstimation(v.csvLog, "verifier")
+	err = v.logEstimation(v.csvLog, "verifier")
+	if err != nil {
+		log.Printf("Error printing to CSV log file: %v", err)
+	}
 
 	return reply, nil
 }
 
-// estimateMaxAge returns the number of seconds that the current verifier
-// estimates is reasonable to cache response objects. If no estimation
-// has been made yet, an error is returned (and the reasonable thing to
-// do would likely be to set the max-age cache header to 0 or not include
-// it at all).
-func (v verifier) estimateMaxAge() (int, error) {
-	if len(v.estimations) == 0 {
-		return -1, status.Errorf(codes.Internal, "No estimation found yet.")
-	}
-
-	return v.estimations[len(v.estimations)-1].validity, nil
-}
-
 // verify all replies against each other and return the duration until
 // we should verify again.
-func (v verifier) estimate() (estimatedMaxAge int, verificationInterval time.Duration, err error) {
+func (v *verifier) estimate() (estimatedMaxAge time.Duration, verificationInterval time.Duration, err error) {
 	estimatedMaxAge, err = v.produceEstimation()
 	if err != nil {
 		log.Printf("Failed to determine max-age for %s", v.String())
@@ -219,7 +210,7 @@ func (v verifier) estimate() (estimatedMaxAge int, verificationInterval time.Dur
 	return estimatedMaxAge, verificationInterval, err
 }
 
-func (v verifier) produceEstimation() (estimate int, err error) {
+func (v *verifier) produceEstimation() (estimate time.Duration, err error) {
 	value, present := os.LookupEnv("PROXY_MAX_AGE")
 
 	if !present {
@@ -235,7 +226,7 @@ func (v verifier) produceEstimation() (estimate int, err error) {
 				log.Printf("Failed to estimate max-age for %s due to %v", v.String(), err)
 				return -1, err
 			}
-			return int(dur.Seconds()), nil
+			return dur, nil
 		}
 	case "passthrough":
 		{
@@ -247,6 +238,6 @@ func (v verifier) produceEstimation() (estimate int, err error) {
 			log.Printf("Failed to parse PROXY_MAX_AGE (%s) into integer", value)
 			return -1, err
 		}
-		return maxAge, nil
+		return time.Duration(maxAge) * time.Second, nil
 	}
 }

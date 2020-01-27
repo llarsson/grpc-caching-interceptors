@@ -40,18 +40,15 @@ type ValidityEstimator interface {
 	// and is used for capturing information needed to make estimations
 	// more accurate by polling the origin server.
 	UnaryClientInterceptor() grpc.UnaryClientInterceptor
-	// Logs the current estimate onto the logger, setting the name of the
-	// source to the given parameter.
-	LogEstimation(log *log.Logger, source string) error
 }
 
 // Verifier verifies and estimates TTL for request/response objects.
 type Verifier interface {
 	run()
 	update(reply proto.Message) error
+	estimate() (estimatedMaxAge time.Duration, verificationInterval time.Duration, err error)
 	logEstimation(log *log.Logger, source string) error
 	String() string
-	estimateMaxAge() (int, error)
 }
 
 // ConfigurableValidityEstimator is a configurable ValidityEstimator.
@@ -85,7 +82,7 @@ func (e *ConfigurableValidityEstimator) Initialize(csvLog *log.Logger) {
 // estimateMaxAge estimates the cache validity of the specified
 // request/response pair for the given method. The result is given
 // in seconds.
-func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req interface{}, resp interface{}) (int, error) {
+func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req interface{}, resp interface{}) (time.Duration, error) {
 	value, found := e.verifiers.Get(hash(fullMethod, req))
 
 	if found {
@@ -101,7 +98,10 @@ func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req in
 			return -1, err
 		}
 
-		verifier.logEstimation(e.csvLog, "client")
+		err = verifier.logEstimation(e.csvLog, "client")
+		if err != nil {
+			log.Printf("Failed to log CSV %v", err)
+		}
 
 		return maxAge, nil
 	}
@@ -125,8 +125,8 @@ func (e *ConfigurableValidityEstimator) UnaryServerInterceptor() grpc.UnaryServe
 		}
 
 		maxAge, err := e.estimateMaxAge(info.FullMethod, req, resp)
-		if err == nil && maxAge > 0 {
-			grpc.SetHeader(ctx, metadata.Pairs("cache-control", fmt.Sprintf("must-revalidate, max-age=%d", maxAge)))
+		if err == nil && maxAge.Seconds() > 0 {
+			grpc.SetHeader(ctx, metadata.Pairs("cache-control", fmt.Sprintf("must-revalidate, max-age=%d", int(maxAge.Seconds()))))
 		}
 
 		log.Printf("%s hit upstream and cache max-age set to %d", info.FullMethod, maxAge)
