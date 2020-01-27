@@ -4,8 +4,6 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type dynamicTBG1Strategy struct {
@@ -24,7 +22,7 @@ func (strat *dynamicTBG1Strategy) determineInterval(intervals *[]interval, verif
 	if len(*estimations) > 0 {
 		return (*estimations)[len(*estimations)-1].validity / 2, nil
 	}
-	return -1, status.Errorf(codes.Internal, "Not enough estimates to determine interval")
+	return time.Duration(1 * time.Second), nil
 }
 
 func (strat *dynamicTBG1Strategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {

@@ -124,14 +124,15 @@ func (e *ConfigurableValidityEstimator) UnaryServerInterceptor() grpc.UnaryServe
 			return resp, err
 		}
 
+		maxAgeMessage := ", but an error occurred while estimating max-age"
 		maxAge, err := e.estimateMaxAge(info.FullMethod, req, resp)
 		if err == nil && maxAge.Seconds() > 0 {
 			grpc.SetHeader(ctx, metadata.Pairs("cache-control", fmt.Sprintf("must-revalidate, max-age=%d", int(maxAge.Seconds()))))
+			maxAgeMessage = fmt.Sprintf(" and cache max-age set to %d", maxAge)
 		}
 
-		log.Printf("%s hit upstream and cache max-age set to %d", info.FullMethod, maxAge)
-
-		return resp, err
+		log.Printf("%s hit upstream%s", info.FullMethod, maxAgeMessage)
+		return resp, nil
 	}
 }
 
