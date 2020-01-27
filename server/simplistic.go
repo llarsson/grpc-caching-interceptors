@@ -9,6 +9,9 @@ import (
 type simplisticStrategy struct {
 }
 
+// compile-time check that we adhere to interface
+var _ estimationStrategy = (*simplisticStrategy)(nil)
+
 func (strat *simplisticStrategy) initialize() {
 
 }

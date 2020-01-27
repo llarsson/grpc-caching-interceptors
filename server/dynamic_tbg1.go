@@ -11,6 +11,9 @@ type dynamicTBG1Strategy struct {
 	deltaTimestamps []time.Time
 }
 
+// compile-time check that we adhere to interface
+var _ estimationStrategy = (*dynamicTBG1Strategy)(nil)
+
 func (strat *dynamicTBG1Strategy) initialize() {
 }
 
