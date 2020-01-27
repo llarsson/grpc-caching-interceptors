@@ -7,7 +7,7 @@ import (
 )
 
 type dynamicTBG1Strategy struct {
-	prevMessage proto.Message
+	prevMessage     verification
 	deltaTimestamps []time.Time
 }
 
@@ -19,7 +19,7 @@ func (strat *dynamicTBG1Strategy) initialize() {
 
 func (strat *dynamicTBG1Strategy) determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
 	// Nyqvist sampling theorem, sample twice as fast as the observed frequency
-	return time.Duration((*estimations)[len(*estimations)]/2 * time.Second), nil
+	return time.Duration((*estimations)[len(*estimations)].validity / 2), nil
 }
 
 func (strat *dynamicTBG1Strategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
@@ -28,14 +28,14 @@ func (strat *dynamicTBG1Strategy) determineEstimation(intervals *[]interval, ver
 
 	// If there is difference between this and the previous sample, save time stamp
 	if proto.Equal(newMessage.reply, strat.prevMessage.reply) {
-		append(stats.deltaTimestamps, newMessage.timestamp)
+		strat.deltaTimestamps = append(strat.deltaTimestamps, newMessage.timestamp)
 	}
 
 	// Run through all timestamps and estimate validity period
-	avgDur := 0
-	nbrDelta := len(*strat.deltaTimestamps)
+	avgDur := 0.0
+	nbrDelta := len(strat.deltaTimestamps)
 	for i := nbrDelta; i > 0; i-- {
-		avgDur += ((*strat.deltaTimestamps)[i].Sub((*strat.deltaTimestamps)[i-1])/nbrDelta).Seconds()
+		avgDur += (strat.deltaTimestamps[i]).Sub((strat.deltaTimestamps)[i-1]).Seconds() / float64(nbrDelta)
 	}
 
 	// Save the previous message.
