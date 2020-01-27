@@ -6,20 +6,20 @@ import (
 	"github.com/golang/protobuf/proto"
 )
 
-type dynamicStrategy struct {
+type dynamicTBG1Strategy struct {
 	prevMessage proto.Message
 	deltaTimestamps []time.Time
 }
 
-func (strat *dynamicStrategy) initialize() {
+func (strat *dynamicTBG1Strategy) initialize() {
 }
 
-func (strat *dynamicStrategy) determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
+func (strat *dynamicTBG1Strategy) determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
 	// Nyqvist sampling theorem, sample twice as fast as the observed frequency
 	return time.Duration((*estimations)[len(*estimations)]/2 * time.Second), nil
 }
 
-func (strat *dynamicStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
+func (strat *dynamicTBG1Strategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
 	// Rerteive newest message
 	newMessage := (*verifications)[len(*verifications)]
 
