@@ -40,6 +40,18 @@ type ValidityEstimator interface {
 	// and is used for capturing information needed to make estimations
 	// more accurate by polling the origin server.
 	UnaryClientInterceptor() grpc.UnaryClientInterceptor
+	// Logs the current estimate onto the logger, setting the name of the
+	// source to the given parameter.
+	LogEstimation(log *log.Logger, source string) error
+}
+
+// Verifier verifies and estimates TTL for request/response objects.
+type Verifier interface {
+	run()
+	update(reply proto.Message) error
+	logEstimation(log *log.Logger, source string) error
+	String() string
+	estimateMaxAge() (int, error)
 }
 
 // ConfigurableValidityEstimator is a configurable ValidityEstimator.
@@ -58,7 +70,7 @@ func (e *ConfigurableValidityEstimator) Initialize(csvLog *log.Logger) {
 	e.verifiers = cache.New(time.Duration(MaximumCacheValidity)*time.Second, time.Duration(MaximumCacheValidity)*10*time.Second)
 	e.done = make(chan string, 1000)
 	e.csvLog = csvLog
-	e.csvLog.Printf("timestamp,source,method\n")
+	e.csvLog.Printf("timestamp,source,method,estimate\n")
 
 	// clean up finished verifiers
 	go func() {
@@ -78,7 +90,6 @@ func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req in
 
 	if found {
 		verifier := value.(*verifier)
-		e.csvLog.Printf("%d,client,%s(%s)\n", time.Now().UnixNano(), verifier.method, verifier.req)
 		err := verifier.update(resp.(proto.Message))
 		if err != nil {
 			log.Printf("Unable to update verifier %s", verifier.String())
@@ -89,6 +100,8 @@ func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req in
 		if err != nil {
 			return -1, err
 		}
+
+		verifier.logEstimation(e.csvLog, "client")
 
 		return maxAge, nil
 	}
