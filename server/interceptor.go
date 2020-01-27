@@ -217,6 +217,8 @@ func initializeStrategy() estimationStrategy {
 		strategy = &simplisticStrategy{}
 	} else {
 		switch name {
+		case "tbg1":
+			strategy = &dynamicTBG1Strategy{}
 		case "simplistic":
 			strategy = &simplisticStrategy{}
 		default:
