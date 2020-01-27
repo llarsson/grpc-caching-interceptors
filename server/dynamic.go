@@ -12,7 +12,6 @@ type dynamicStrategy struct {
 }
 
 func (strat *dynamicStrategy) initialize() {
-	deltaCount = nil
 }
 
 func (strat *dynamicStrategy) determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
