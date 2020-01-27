@@ -19,7 +19,7 @@ func (strat *dynamicTBG1Strategy) initialize() {
 
 func (strat *dynamicTBG1Strategy) determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
 	// Nyqvist sampling theorem, sample twice as fast as the observed frequency
-	return time.Duration((*estimations)[len(*estimations)].validity / 2), nil
+	return (*estimations)[len(*estimations)].validity / 2, nil
 }
 
 func (strat *dynamicTBG1Strategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
