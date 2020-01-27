@@ -39,5 +39,5 @@ func (strat *dynamicTBG1Strategy) determineEstimation(intervals *[]interval, ver
 	strat.prevMessage = newMessage
 
 	// TTL is estimate, otherwise 0
-	return time.Duration(avgDur), nil
+	return time.Duration(int(avgDur)), nil
 }
