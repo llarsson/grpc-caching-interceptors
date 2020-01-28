@@ -24,7 +24,7 @@ import (
 const (
 	// MaximumCacheValidity is the highest number of seconds that an object
 	// can be considered valid.
-	MaximumCacheValidity = 45
+	MaximumCacheValidity = 1000
 )
 
 // A ValidityEstimator hooks into the server side, and performs estimation of
