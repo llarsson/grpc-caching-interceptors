@@ -31,8 +31,8 @@ func (strat *simplisticStrategy) determineEstimation(intervals *[]interval, veri
 			break // we no longer match, might as well quit early...
 		}
 	}
-	unchanged := int(lastVerification.timestamp.Sub(oldestVerification.timestamp).Seconds())
+	unchanged := lastVerification.timestamp.Sub(oldestVerification.timestamp)
 
 	// claim that the TTL is half of the observed "unchanged" interval
-	return time.Duration(unchanged/2) * time.Second, nil
+	return time.Duration(unchanged / 2), nil
 }
