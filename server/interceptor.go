@@ -212,20 +212,30 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 func initializeStrategy() estimationStrategy {
 	var strategy estimationStrategy
 
-	name, found := os.LookupEnv("PROXY_ESTIMATION_STRATEGY")
-
+	proxyMaxAge, found := os.LookupEnv("PROXY_MAX_AGE")
 	if !found {
-		log.Printf("PROXY_ESTIMATION_STRATEGY not set, using simplistic")
-		strategy = &simplisticStrategy{}
+		log.Printf("PROXY_MAX_AGE not found, acting in passthrough mode")
+		strategy = &nilStrategy{}
 	} else {
-		switch name {
-		case "tbg1":
-			strategy = &dynamicTBG1Strategy{}
-		case "simplistic":
-			strategy = &simplisticStrategy{}
-		default:
-			log.Printf("Unknown PROXY_ESTIMATION_STRATEGY=%s specified, using simplistic", name)
-			strategy = &simplisticStrategy{}
+		if proxyMaxAge == "dynamic" {
+			proxyEstimationStrategy, found := os.LookupEnv("PROXY_ESTIMATION_STRATEGY")
+			if !found {
+				log.Printf("PROXY_ESTIMATION_STRATEGY not set, using simplistic")
+				strategy = &simplisticStrategy{}
+			} else {
+				switch proxyEstimationStrategy {
+				case "tbg1":
+					strategy = &dynamicTBG1Strategy{}
+				case "simplistic":
+					strategy = &simplisticStrategy{}
+				default:
+					log.Printf("Unknown PROXY_ESTIMATION_STRATEGY=%s specified, using simplistic", proxyEstimationStrategy)
+					strategy = &simplisticStrategy{}
+				}
+			}
+		} else {
+			log.Printf("PROXY_MAX_AGE was not dynamic, acting in passthrough mode")
+			strategy = &nilStrategy{}
 		}
 	}
 
