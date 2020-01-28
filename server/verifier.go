@@ -60,7 +60,7 @@ func (v *verifier) logEstimation(log *log.Logger, source string) error {
 		return nil
 	}
 
-	return status.Errorf(codes.Internal, "No estimation to print")
+	return fmt.Errorf("no estimations to log yet")
 }
 
 // String is a string representation of a given verifier.
