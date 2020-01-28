@@ -35,15 +35,15 @@ func (strat *dynamicTBG1Strategy) determineEstimation(intervals *[]interval, ver
 	}
 
 	// Run through all timestamps and estimate validity period
-	avgDur := 0.0
+	sumDur := int64(0)
 	nbrDelta := len(strat.deltaTimestamps)
 	for i := nbrDelta - 1; i > 0; i-- {
-		avgDur += (strat.deltaTimestamps[i]).Sub((strat.deltaTimestamps)[i-1]).Seconds() / float64(nbrDelta)
+		sumDur += (strat.deltaTimestamps[i]).Sub((strat.deltaTimestamps)[i-1]).Nanoseconds()
 	}
 
 	// Save the previous message.
 	strat.prevMessage = newMessage
 
 	// TTL is estimate, otherwise 0
-	return time.Duration(int(avgDur)), nil
+	return time.Duration(sumDur / int64(nbrDelta)), nil
 }
