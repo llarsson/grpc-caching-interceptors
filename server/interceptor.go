@@ -46,7 +46,7 @@ type ValidityEstimator interface {
 type Verifier interface {
 	run()
 	update(reply proto.Message) error
-	estimate() (estimatedMaxAge time.Duration, verificationInterval time.Duration, err error)
+	estimate() (time.Duration, error)
 	logEstimation(log *log.Logger, source string) error
 	String() string
 }
@@ -93,7 +93,7 @@ func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req in
 			return -1, err
 		}
 
-		maxAge, _, err := verifier.estimate()
+		maxAge, err := verifier.estimate()
 		if err != nil {
 			return -1, err
 		}
@@ -215,7 +215,7 @@ func initializeStrategy() estimationStrategy {
 	proxyMaxAge, found := os.LookupEnv("PROXY_MAX_AGE")
 	if !found {
 		log.Printf("PROXY_MAX_AGE not found, acting in passthrough mode")
-		strategy = &nilStrategy{}
+		strategy = nil
 	} else {
 		if proxyMaxAge == "dynamic" {
 			proxyEstimationStrategy, found := os.LookupEnv("PROXY_ESTIMATION_STRATEGY")
@@ -235,10 +235,13 @@ func initializeStrategy() estimationStrategy {
 			}
 		} else {
 			log.Printf("PROXY_MAX_AGE was not dynamic, acting in passthrough mode")
-			strategy = &nilStrategy{}
+			strategy = nil
 		}
 	}
 
-	strategy.initialize()
+	if strategy != nil {
+		strategy.initialize()
+	}
+
 	return strategy
 }

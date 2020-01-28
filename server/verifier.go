@@ -155,18 +155,21 @@ func (v *verifier) update(reply proto.Message) error {
 	v.verifications = append(v.verifications, verification{reply: proto.Clone(reply), timestamp: now})
 
 	// update estimations
-	estimate, verificationInterval, err := v.estimate()
+	err := v.updateEstimations(reply)
 	if err != nil {
-		log.Printf("Error estimating for %s <- %s", v.String(), reply)
-		return err
+		log.Printf("Error updating estimations for %s <- %s", v.String(), reply)
 	}
-	v.estimations = append(v.estimations, estimation{validity: estimate, timestamp: now})
 
 	// update sleep interval
-	v.intervals = append(v.intervals, interval{duration: verificationInterval, timestamp: now})
+	err = v.updateIntervals(reply)
+	if err != nil {
+		log.Printf("Error updating intervals for %s <- %s", v.String(), reply)
+	}
 
 	// FIXME Should we need to interrupt the sleeping goroutine, or do we not care?
 
+	// The only true failure is if we are finished and yet were called.
+	// The others do not matter.
 	return nil
 }
 
@@ -192,25 +195,31 @@ func (v *verifier) fetch() (proto.Message, error) {
 	return reply, nil
 }
 
-// verify all replies against each other and return the duration until
-// we should verify again.
-func (v *verifier) estimate() (estimatedMaxAge time.Duration, verificationInterval time.Duration, err error) {
-	estimatedMaxAge, err = v.produceEstimation()
-	if err != nil {
-		log.Printf("Failed to determine max-age for %s", v.String())
-		return -1, time.Duration(0), err
+func (v *verifier) updateIntervals(reply proto.Message) error {
+	if v.strategy != nil {
+		duration, err := v.strategy.determineInterval(&v.intervals, &v.verifications, &v.estimations)
+		if err != nil {
+			return err
+		}
+		v.intervals = append(v.intervals, interval{duration: duration, timestamp: time.Now()})
 	}
 
-	verificationInterval, err = v.strategy.determineInterval(&v.intervals, &v.verifications, &v.estimations)
-	if err != nil {
-		log.Printf("Failed to determine verification interval for %s", v.String())
-		return -1, time.Duration(0), err
-	}
-
-	return estimatedMaxAge, verificationInterval, err
+	return nil
 }
 
-func (v *verifier) produceEstimation() (estimate time.Duration, err error) {
+func (v *verifier) updateEstimations(reply proto.Message) error {
+	if v.strategy != nil {
+		validity, err := v.strategy.determineEstimation(&v.intervals, &v.verifications, &v.estimations)
+		if err != nil {
+			return err
+		}
+		v.estimations = append(v.estimations, estimation{validity: validity, timestamp: time.Now()})
+	}
+
+	return nil
+}
+
+func (v *verifier) estimate() (estimate time.Duration, err error) {
 	value, present := os.LookupEnv("PROXY_MAX_AGE")
 
 	if !present {
@@ -221,12 +230,13 @@ func (v *verifier) produceEstimation() (estimate time.Duration, err error) {
 	switch value {
 	case "dynamic":
 		{
-			dur, err := v.strategy.determineEstimation(&v.intervals, &v.verifications, &v.estimations)
-			if err != nil {
-				log.Printf("Failed to estimate max-age for %s due to %v", v.String(), err)
-				return -1, err
+			if v.strategy == nil {
+				return -1, status.Errorf(codes.Internal, "No strategy set for dynamic TTL estimation")
 			}
-			return dur, nil
+			if len(v.estimations) == 0 {
+				return 0, nil
+			}
+			return v.estimations[len(v.estimations)-1].validity, nil
 		}
 	case "passthrough":
 		{
