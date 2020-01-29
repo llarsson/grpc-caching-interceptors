@@ -240,6 +240,8 @@ func initializeStrategy() estimationStrategy {
 			strategy = &dynamicTBG1Strategy{}
 		case "simplistic":
 			strategy = &simplisticStrategy{}
+		case "nyqvistish":
+			strategy = &nyqvistishStrategy{}
 		default:
 			log.Printf("Unknown dynamic strategy (%s), using simplistic", strategySpecifier)
 			strategy = &simplisticStrategy{}
