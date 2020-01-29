@@ -11,6 +11,8 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -117,24 +119,40 @@ func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req in
 func (e *ConfigurableValidityEstimator) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-
 		resp, err := handler(ctx, req)
 		if err != nil {
 			log.Printf("Upstream call failed with error %v", err)
 			return resp, err
 		}
 
-		maxAgeMessage := ", but an error occurred while "
-		maxAge, err := e.estimateMaxAge(info.FullMethod, req, resp)
-		if err == nil {
-			ttl := int(maxAge.Seconds())
-			grpc.SetHeader(ctx, metadata.Pairs("cache-control", fmt.Sprintf("must-revalidate, max-age=%d", ttl)))
-			maxAgeMessage = fmt.Sprintf(" and cache max-age set to %d", ttl)
+		// Only upstream call failures constitute true errors, so we only log others.
+		var maxAgeMessage string
+		if e.blacklisted(info.FullMethod) {
+			maxAgeMessage = fmt.Sprintf(", but method %s blacklisted from caching", info.FullMethod)
+		} else {
+			maxAge, err := e.estimateMaxAge(info.FullMethod, req, resp)
+			if err == nil {
+				ttl := int(maxAge.Seconds())
+				grpc.SetHeader(ctx, metadata.Pairs("cache-control", fmt.Sprintf("must-revalidate, max-age=%d", ttl)))
+				maxAgeMessage = fmt.Sprintf(" and cache max-age set to %d", ttl)
+			} else {
+				maxAgeMessage = ", but an error occurred estimating max-age"
+			}
 		}
 
-		log.Printf("%s hit upstream%s", info.FullMethod, maxAgeMessage)
+		log.Printf("%s(%s) hit upstream%s", info.FullMethod, req, maxAgeMessage)
 		return resp, nil
 	}
+}
+
+func (e *ConfigurableValidityEstimator) blacklisted(method string) bool {
+	if blacklistExpression, found := os.LookupEnv("PROXY_CACHE_BLACKLIST"); found {
+		blacklisted, err := regexp.Match(blacklistExpression, []byte(method))
+		if err == nil && blacklisted {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *ConfigurableValidityEstimator) verificationNeeded(method string, req interface{}) (bool, int) {
@@ -143,25 +161,22 @@ func (e *ConfigurableValidityEstimator) verificationNeeded(method string, req in
 	// the verification process a bit, keeping the number of verifiers
 	// down.
 
-	if blacklistExpression, found := os.LookupEnv("PROXY_CACHE_BLACKLIST"); found {
-		blacklisted, err := regexp.Match(blacklistExpression, []byte(method))
-		if err == nil && blacklisted {
-			log.Printf("Method %s blacklisted from caching.", method)
-			return false, -1
-		}
+	if e.blacklisted(method) {
+		return false, -1
 	}
 
 	hash := hash(method, req)
 	_, expiration, found := e.verifiers.GetWithExpiration(hash)
 	if found {
 		if expiration.IsZero() || time.Now().Before(expiration) {
-			log.Printf("Verification of object %s = %s(%s) not needed, object not expired yet (%s)", hash, method, req, expiration)
+			// Too spammy...
+			//log.Printf("%s(%s) needs no new verifier, object not expired yet (%s)", method, req, expiration)
 			return false, -1
 		}
-		log.Printf("Object %s = %s(%s) found, but expired. Verification needed.", hash, method, req)
+		log.Printf("%s(%s) verifier found, but expired. New verification needed.", method, req)
 		return true, MaximumCacheValidity
 	}
-	log.Printf("Object %s = %s(%s) not found, verification needed", hash, method, req)
+	log.Printf("%s(%s) verifier not found, verification needed", method, req)
 	return true, MaximumCacheValidity
 }
 
@@ -215,33 +230,34 @@ func initializeStrategy() estimationStrategy {
 	proxyMaxAge, found := os.LookupEnv("PROXY_MAX_AGE")
 	if !found {
 		log.Printf("PROXY_MAX_AGE not found, acting in passthrough mode")
-		strategy = nil
-	} else {
-		if proxyMaxAge == "dynamic" {
-			proxyEstimationStrategy, found := os.LookupEnv("PROXY_ESTIMATION_STRATEGY")
-			if !found {
-				log.Printf("PROXY_ESTIMATION_STRATEGY not set, using simplistic")
-				strategy = &simplisticStrategy{}
-			} else {
-				switch proxyEstimationStrategy {
-				case "tbg1":
-					strategy = &dynamicTBG1Strategy{}
-				case "simplistic":
-					strategy = &simplisticStrategy{}
-				default:
-					log.Printf("Unknown PROXY_ESTIMATION_STRATEGY=%s specified, using simplistic", proxyEstimationStrategy)
-					strategy = &simplisticStrategy{}
-				}
-			}
-		} else {
-			log.Printf("PROXY_MAX_AGE was not dynamic, acting in passthrough mode")
-			strategy = nil
-		}
+		return nil
 	}
 
-	if strategy != nil {
-		strategy.initialize()
+	if strings.HasPrefix(proxyMaxAge, "dynamic-") {
+		strategySpecifier := strings.Split(proxyMaxAge, "-")[1]
+		switch strategySpecifier {
+		case "tbg1":
+			strategy = &dynamicTBG1Strategy{}
+		case "simplistic":
+			strategy = &simplisticStrategy{}
+		default:
+			log.Printf("Unknown dynamic strategy (%s), using simplistic", strategySpecifier)
+			strategy = &simplisticStrategy{}
+		}
+	} else if strings.HasPrefix(proxyMaxAge, "static-") {
+		ageSpecifier := strings.Split(proxyMaxAge, "-")[1]
+		maxAge, err := strconv.Atoi(ageSpecifier)
+		if err != nil {
+			log.Printf("Failed to parse PROXY_MAX_AGE (%s) into integer, acting in passthrough mode", ageSpecifier)
+			return nil
+		}
+		strategy = &staticStrategy{ttl: time.Duration(maxAge) * time.Second}
+	} else {
+		log.Printf("Unknown value for PROXY_MAX_AGE=%s, acting in passthrough mode", proxyMaxAge)
+		return nil
 	}
+
+	strategy.initialize()
 
 	return strategy
 }

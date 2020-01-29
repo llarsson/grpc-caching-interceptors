@@ -3,8 +3,6 @@ package server
 import (
 	"fmt"
 	"log"
-	"os"
-	"strconv"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -162,8 +160,8 @@ func (v *verifier) update(reply proto.Message) error {
 
 	// update sleep interval
 	err = v.updateIntervals(reply)
-	if err != nil {
-		log.Printf("Error updating intervals for %s <- %s", v.String(), reply)
+	if _, static := v.strategy.(*staticStrategy); !static && err != nil {
+		log.Printf("Error updating intervals for %s=(%s)", v.String(), reply)
 	}
 
 	// FIXME Should we need to interrupt the sleeping goroutine, or do we not care?
@@ -220,34 +218,8 @@ func (v *verifier) updateEstimations(reply proto.Message) error {
 }
 
 func (v *verifier) estimate() (estimate time.Duration, err error) {
-	value, present := os.LookupEnv("PROXY_MAX_AGE")
-
-	if !present {
-		// It is not an error to not have the proxy max age key present in environment. We just act as if we were in passthrough mode.
-		return -1, nil
+	if len(v.estimations) == 0 {
+		return 0, nil
 	}
-
-	switch value {
-	case "dynamic":
-		{
-			if v.strategy == nil {
-				return -1, status.Errorf(codes.Internal, "No strategy set for dynamic TTL estimation")
-			}
-			if len(v.estimations) == 0 {
-				return 0, nil
-			}
-			return v.estimations[len(v.estimations)-1].validity, nil
-		}
-	case "passthrough":
-		{
-			return -1, nil
-		}
-	default:
-		maxAge, err := strconv.Atoi(value)
-		if err != nil {
-			log.Printf("Failed to parse PROXY_MAX_AGE (%s) into integer", value)
-			return -1, err
-		}
-		return time.Duration(maxAge) * time.Second, nil
-	}
+	return v.estimations[len(v.estimations)-1].validity, nil
 }
