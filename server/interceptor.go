@@ -9,6 +9,7 @@ package server
 import (
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"regexp"
 	"strconv"
@@ -132,7 +133,7 @@ func (e *ConfigurableValidityEstimator) UnaryServerInterceptor() grpc.UnaryServe
 		} else {
 			maxAge, err := e.estimateMaxAge(info.FullMethod, req, resp)
 			if err == nil {
-				ttl := int(maxAge.Seconds())
+				ttl := int(math.Round(maxAge.Seconds()))
 				grpc.SetHeader(ctx, metadata.Pairs("cache-control", fmt.Sprintf("must-revalidate, max-age=%d", ttl)))
 				maxAgeMessage = fmt.Sprintf(" and cache max-age set to %d", ttl)
 			} else {
