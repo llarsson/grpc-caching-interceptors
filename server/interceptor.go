@@ -241,6 +241,8 @@ func initializeStrategy() estimationStrategy {
 			strategy = &dynamicTBG1Strategy{}
 		case "simplistic":
 			strategy = &simplisticStrategy{}
+		case "chilledout":
+			strategy = &chilledoutStrategy{}
 		case "nyqvistish":
 			strategy = &nyqvistishStrategy{}
 		default:
