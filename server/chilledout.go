@@ -2,6 +2,7 @@ package server
 
 import (
 	"log"
+	"math"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -18,11 +19,11 @@ func (strat *chilledoutStrategy) initialize() {
 }
 
 func (strat *chilledoutStrategy) determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
-	if len(*estimations) > 0 {
-		lastEstimate := (*estimations)[len(*estimations)-1]
-		if lastEstimate.validity > 0 {
-			return time.Duration(1.0/lastEstimate.validity.Seconds()) * time.Second, nil
-		}
+	if len(*estimations) >= 2 {
+		a := (*verifications)[len(*verifications)-1]
+		b := (*verifications)[len(*verifications)-2]
+
+		return time.Duration(int64(math.Round(1.0/a.timestamp.Sub(b.timestamp).Seconds()))) * time.Second, nil
 	}
 	return time.Duration(5 * time.Second), nil
 }
