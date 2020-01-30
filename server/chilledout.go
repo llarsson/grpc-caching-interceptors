@@ -42,5 +42,5 @@ func (strat *chilledoutStrategy) determineEstimation(intervals *[]interval, veri
 	unchanged := lastVerification.timestamp.Sub(oldestVerification.timestamp)
 
 	// claim that the TTL is half of the observed "unchanged" interval
-	return time.Duration(unchanged / 2), nil
+	return time.Duration(int(math.Round(math.Min(1, unchanged.Seconds()/2.0)))) * time.Second, nil
 }
