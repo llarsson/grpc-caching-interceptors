@@ -19,7 +19,7 @@ func (strat *chilledoutStrategy) initialize() {
 }
 
 func (strat *chilledoutStrategy) determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
-	if len(*estimations) >= 2 {
+	if len(*verifications) >= 2 {
 		a := (*verifications)[len(*verifications)-1]
 		b := (*verifications)[len(*verifications)-2]
 
@@ -42,5 +42,5 @@ func (strat *chilledoutStrategy) determineEstimation(intervals *[]interval, veri
 	unchanged := lastVerification.timestamp.Sub(oldestVerification.timestamp)
 
 	// claim that the TTL is half of the observed "unchanged" interval
-	return time.Duration(int(math.Round(math.Min(1, unchanged.Seconds()/2.0)))) * time.Second, nil
+	return time.Duration(int(math.Round(math.Max(1, unchanged.Seconds()/2.0)))) * time.Second, nil
 }
