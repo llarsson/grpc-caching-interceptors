@@ -1,10 +1,10 @@
 package server
 
-import "time"
+import (
+	"time"
 
-import "github.com/golang/protobuf/proto"
-
-import "fmt"
+	"github.com/golang/protobuf/proto"
+)
 
 // EqualVerifications conveniently checks if two verification structs are equal.
 func EqualVerifications(a verification, b verification) bool {
@@ -13,7 +13,7 @@ func EqualVerifications(a verification, b verification) bool {
 
 // BackwardsUpdateDistance computes backwards K-update distance as in Lee et al.
 // "An Update-Risk Based Approach to TTL Estimation in Web Caching"
-func BackwardsUpdateDistance(verifications *[]verification, K int) ([]time.Time, error) {
+func BackwardsUpdateDistance(verifications *[]verification, K int) ([]time.Time, int) {
 	timestamps := make([]time.Time, K)
 
 	var v verification
@@ -32,8 +32,8 @@ func BackwardsUpdateDistance(verifications *[]verification, K int) ([]time.Time,
 	}
 
 	if updates == 0 {
-		return timestamps, fmt.Errorf("No updates to object have been made")
+		return timestamps, updates
 	}
 
-	return timestamps, nil
+	return timestamps, updates
 }
