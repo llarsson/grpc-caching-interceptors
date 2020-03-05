@@ -235,16 +235,26 @@ func initializeStrategy() estimationStrategy {
 	}
 
 	if strings.HasPrefix(proxyMaxAge, "dynamic-") {
-		strategySpecifier := strings.Split(proxyMaxAge, "-")[1]
-		switch strategySpecifier {
+		dynamicStrategySpecifiers := strings.Split(proxyMaxAge, "-")
+		strategyName := strings.Split(proxyMaxAge, "-")[1]
+		switch strategyName {
 		case "tbg1":
 			strategy = &dynamicTBG1Strategy{}
 		case "simplistic":
 			strategy = &simplisticStrategy{}
 		case "nyqvistish":
 			strategy = &nyqvistishStrategy{}
+		case "adaptive":
+			alphaStr := dynamicStrategySpecifiers[2]
+			alpha, err := strconv.ParseFloat(alphaStr, 64)
+			if err != nil {
+				log.Printf("Failed to parse alpha parameter for Adaptive strategy (%s), acting in passthrough mode", alphaStr)
+				return nil
+			}
+
+			strategy = &adaptiveStrategy{alpha: alpha}
 		default:
-			log.Printf("Unknown dynamic strategy (%s), using simplistic", strategySpecifier)
+			log.Printf("Unknown dynamic strategy (%s), using simplistic", strategyName)
 			strategy = &simplisticStrategy{}
 		}
 	} else if strings.HasPrefix(proxyMaxAge, "static-") {
