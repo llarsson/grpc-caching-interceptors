@@ -1,19 +1,20 @@
 package server
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 )
 
-// EqualVerifications conveniently checks if two verification structs are equal.
-func EqualVerifications(a verification, b verification) bool {
+// equalVerifications conveniently checks if two verification structs are equal.
+func equalVerifications(a verification, b verification) bool {
 	return proto.Equal(a.reply, b.reply)
 }
 
-// BackwardsUpdateDistance computes backwards K-update distance as in Lee et al.
+// backwardsUpdateDistance computes backwards K-update distance as in Lee et al.
 // "An Update-Risk Based Approach to TTL Estimation in Web Caching"
-func BackwardsUpdateDistance(verifications *[]verification, K int) ([]time.Time, int) {
+func backwardsUpdateDistance(verifications *[]verification, K int) ([]time.Time, int) {
 	timestamps := make([]time.Time, K)
 
 	var v verification
@@ -24,7 +25,7 @@ func BackwardsUpdateDistance(verifications *[]verification, K int) ([]time.Time,
 
 	for i := len(*verifications) - 1; i >= 0 && updates < K; i-- {
 		var current = (*verifications)[i]
-		if !EqualVerifications(v, current) {
+		if !equalVerifications(v, current) {
 			timestamps[updates] = current.timestamp
 			updates++
 			v = current
@@ -36,4 +37,15 @@ func BackwardsUpdateDistance(verifications *[]verification, K int) ([]time.Time,
 	}
 
 	return timestamps, updates
+}
+
+// lastEstimation returns the last estimation in the list of estimations
+// or raises an error if no estimations are found.
+func lastEstimation(estimates *[]estimation) (estimation, error) {
+	length := len(*estimates)
+	if length > 0 {
+		return (*estimates)[length-1], nil
+	}
+
+	return estimation{}, fmt.Errorf("List of estimations is empty")
 }
