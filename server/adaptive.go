@@ -23,13 +23,13 @@ func (strat *adaptiveStrategy) determineInterval(intervals *[]interval, verifica
 func (strat *adaptiveStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
 	var lastModification time.Time
 	// just need the very last update, so K=1
-	modifications, updates := BackwardsUpdateDistance(verifications, 1)
+	timestamps, updates := BackwardsUpdateDistance(verifications, 1)
 	if updates == 0 {
 		// no value updates! use oldest known timestamp
 		lastModification = (*verifications)[0].timestamp
 	} else {
 		// we have non-zero updates: use most recent
-		lastModification = modifications[0]
+		lastModification = timestamps[0]
 	}
 
 	estimatedTTL := float64(time.Now().Sub(lastModification).Nanoseconds()) * strat.alpha
