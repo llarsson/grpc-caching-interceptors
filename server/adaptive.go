@@ -32,7 +32,11 @@ func (strat *adaptiveStrategy) determineEstimation(intervals *[]interval, verifi
 		lastModification = timestamps[0]
 	}
 
-	estimatedTTL := float64(time.Now().Sub(lastModification).Nanoseconds()) * strat.alpha
+	estimatedTTL := estimateTTL(lastModification, strat.alpha)
+	return estimatedTTL, nil
+}
 
-	return time.Duration(int64(estimatedTTL)), nil
+func estimateTTL(lastModification time.Time, alpha float64) time.Duration {
+	estimatedTTL := float64(time.Now().Sub(lastModification).Nanoseconds()) * alpha
+	return time.Duration(int64(estimatedTTL))
 }
