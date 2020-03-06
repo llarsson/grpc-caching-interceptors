@@ -24,6 +24,8 @@ func (strat *updateRiskBasedStrategy) initialize() {
 	log.Printf("Using Update-Risk Based strategy (K=%d)", strat.K)
 }
 
+// This comes in no way from the original paper, but our interface demands it,
+// so this should be a reasonable implementation of interval determination.
 func (strat *updateRiskBasedStrategy) determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
 	estimate, err := lastEstimation(estimations)
 	if err != nil {
