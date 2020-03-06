@@ -253,6 +253,15 @@ func initializeStrategy() estimationStrategy {
 			}
 
 			strategy = &adaptiveStrategy{alpha: alpha}
+		case "updaterisk":
+			rhoStr := dynamicStrategySpecifiers[2]
+			rho, err := strconv.ParseFloat(rhoStr, 64)
+			if err != nil {
+				log.Printf("Failed to parse rho parameter for Update-risk Based strategy (%s), acting in passthrough mode", rhoStr)
+				return nil
+			}
+
+			strategy = &updateRiskBasedStrategy{rho: rho}
 		default:
 			log.Printf("Unknown dynamic strategy (%s), using simplistic", strategyName)
 			strategy = &simplisticStrategy{}

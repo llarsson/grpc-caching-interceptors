@@ -6,10 +6,6 @@ import (
 	"time"
 )
 
-const (
-	defaultInterval = time.Duration(5 * time.Second)
-)
-
 type adaptiveStrategy struct {
 	alpha float64
 }
@@ -45,19 +41,11 @@ func (strat *adaptiveStrategy) determineEstimation(intervals *[]interval, verifi
 		lastModification = timestamps[0]
 	}
 
-	estimatedTTL := estimateTTL(lastModification, strat.alpha)
+	estimatedTTL := strat.estimateTTL(lastModification)
 	return estimatedTTL, nil
 }
 
-func estimateTTL(lastModification time.Time, alpha float64) time.Duration {
-	estimatedTTL := float64(time.Now().Sub(lastModification).Nanoseconds()) * alpha
+func (strat *adaptiveStrategy) estimateTTL(lastModification time.Time) time.Duration {
+	estimatedTTL := float64(time.Now().Sub(lastModification).Nanoseconds()) * strat.alpha
 	return time.Duration(int64(estimatedTTL))
-}
-
-func maxInt64(a int64, b int64) int64 {
-	if a >= b {
-		return a
-	}
-
-	return b
 }
