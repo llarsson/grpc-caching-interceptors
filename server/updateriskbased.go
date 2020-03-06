@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// This implementation embodies (our understanding of) Lee et al.
+// "An Update-Risk Based Approach to TTL Estimation in Web Caching", 2002.
+// https://doi.org/10.1109/WISE.2002.1181640
 type updateRiskBasedStrategy struct {
 	K   int
 	rho float64
