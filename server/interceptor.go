@@ -44,12 +44,12 @@ func (e *ConfigurableValidityEstimator) Initialize(csvLog *log.Logger) {
 // estimateMaxAge estimates the cache validity of the specified
 // request/response pair for the given method. The result is given
 // in seconds.
-func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req interface{}, resp interface{}) (time.Duration, error) {
+func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req interface{}, resp interface{}, responseTime time.Duration) (time.Duration, error) {
 	value, found := e.verifiers.Get(hash(fullMethod, req))
 
 	if found {
 		verifier := value.(*verifier)
-		err := verifier.update(resp.(proto.Message))
+		err := verifier.update(resp.(proto.Message), responseTime)
 		if err != nil {
 			log.Printf("Unable to update verifier %s", verifier.string())
 			return -1, err
@@ -79,18 +79,21 @@ func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req in
 func (e *ConfigurableValidityEstimator) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		startTime := time.Now()
 		resp, err := handler(ctx, req)
 		if err != nil {
 			log.Printf("Upstream call failed with error %v", err)
 			return resp, err
 		}
+		endTime := time.Now()
+		responseTime := endTime.Sub(startTime)
 
 		// Only upstream call failures constitute true errors, so we only log others.
 		var maxAgeMessage string
 		if e.blacklisted(info.FullMethod) {
 			maxAgeMessage = fmt.Sprintf(", but method %s blacklisted from caching", info.FullMethod)
 		} else {
-			maxAge, err := e.estimateMaxAge(info.FullMethod, req, resp)
+			maxAge, err := e.estimateMaxAge(info.FullMethod, req, resp, responseTime)
 			if err == nil {
 				ttl := int(math.Round(maxAge.Seconds()))
 				grpc.SetHeader(ctx, metadata.Pairs("cache-control", fmt.Sprintf("must-revalidate, max-age=%d", ttl)))

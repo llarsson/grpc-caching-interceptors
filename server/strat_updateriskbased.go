@@ -38,7 +38,7 @@ func (strat *updateRiskBasedStrategy) determineInterval(intervals *[]interval, v
 	return time.Duration(bounded) * time.Second, nil
 }
 
-func (strat *updateRiskBasedStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
+func (strat *updateRiskBasedStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation, _ time.Duration) (time.Duration, error) {
 	mu := strat.averageUpdateFrequency(verifications)
 	t := -1.0 / mu * math.Log(1.0-strat.rho)
 	return time.Duration(t) * time.Second, nil

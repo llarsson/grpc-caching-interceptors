@@ -25,7 +25,7 @@ func (strat *nyqvistishStrategy) determineInterval(intervals *[]interval, verifi
 	return time.Duration(1 * time.Second), nil
 }
 
-func (strat *nyqvistishStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
+func (strat *nyqvistishStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation, _ time.Duration) (time.Duration, error) {
 	lastVerification := (*verifications)[len(*verifications)-1]
 
 	var oldestVerification verification

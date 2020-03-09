@@ -20,7 +20,7 @@ func (strat *simplisticStrategy) determineInterval(intervals *[]interval, verifi
 	return time.Duration(5 * time.Second), nil
 }
 
-func (strat *simplisticStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
+func (strat *simplisticStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation, _ time.Duration) (time.Duration, error) {
 	lastVerification := (*verifications)[len(*verifications)-1]
 
 	var oldestVerification verification

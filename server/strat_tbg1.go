@@ -39,7 +39,7 @@ func (strat *dynamicTBG1Strategy) determineInterval(intervals *[]interval, verif
 	return time.Duration(-1), fmt.Errorf("No quite yet")
 }
 
-func (strat *dynamicTBG1Strategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
+func (strat *dynamicTBG1Strategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation, _ time.Duration) (time.Duration, error) {
 	// Rerteive newest message
 	newMessage := (*verifications)[len(*verifications)-1]
 

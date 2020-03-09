@@ -21,6 +21,6 @@ func (strat *staticStrategy) determineInterval(intervals *[]interval, verificati
 	return time.Duration(-1), fmt.Errorf("Static TTL=%d strategy does not need intervals", int(strat.ttl.Seconds()))
 }
 
-func (strat *staticStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
+func (strat *staticStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation, _ time.Duration) (time.Duration, error) {
 	return strat.ttl, nil
 }

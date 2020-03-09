@@ -29,7 +29,7 @@ func (strat *adaptiveStrategy) determineInterval(intervals *[]interval, verifica
 	return time.Duration(bounded) * time.Second, nil
 }
 
-func (strat *adaptiveStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
+func (strat *adaptiveStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation, _ time.Duration) (time.Duration, error) {
 	var lastModification time.Time
 	// just need the very last update, so K=1
 	timestamps, updates := backwardsUpdateDistance(verifications, 1)

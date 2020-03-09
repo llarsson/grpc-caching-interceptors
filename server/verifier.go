@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/montanaflynn/stats"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -24,6 +25,9 @@ type verifier struct {
 	cc            *grpc.ClientConn
 	estimations   []estimation
 	done          chan string
+
+	responseTimes       []float64
+	responseTimeCounter int
 
 	csvLog *log.Logger
 }
@@ -66,12 +70,15 @@ func newVerifier(target string, method string, req proto.Message, resp proto.Mes
 		estimations:   make([]estimation, 0),
 		cc:            cc,
 
+		responseTimes:       make([]float64, 256),
+		responseTimeCounter: 0,
+
 		csvLog: csvLog,
 
 		done: done,
 	}
 
-	err = v.update(resp)
+	err = v.update(resp, time.Duration(-1))
 	if err != nil {
 		log.Printf("Unable to create verifier for %s", v.string())
 		return nil, err
@@ -104,13 +111,13 @@ func (v *verifier) run() {
 			break
 		}
 
-		newReply, err := v.fetch()
+		newReply, responseTime, err := v.fetch()
 		if err != nil {
 			log.Printf("Upstream fetch %s failed: %v", v.string(), err)
 			continue
 		}
 
-		v.update(newReply)
+		v.update(newReply, responseTime)
 	}
 
 	// signal that we are done and can be deleted.
@@ -119,10 +126,12 @@ func (v *verifier) run() {
 }
 
 // update internal data structures and estimations based on new data.
-func (v *verifier) update(reply proto.Message) error {
+func (v *verifier) update(reply proto.Message, responseTime time.Duration) error {
 	if v.finished() {
 		return status.Errorf(codes.Internal, "Verifier %s finished, cannot be updated anymore", v.string())
 	}
+
+	v.recordResponseTime(responseTime)
 
 	now := time.Now()
 
@@ -154,20 +163,22 @@ func (v *verifier) finished() bool {
 }
 
 // fetch new reply from upstream service.
-func (v *verifier) fetch() (proto.Message, error) {
+func (v *verifier) fetch() (proto.Message, time.Duration, error) {
 	reply := proto.Clone(v.verifications[0].reply)
+	startTime := time.Now()
 	err := v.cc.Invoke(context.Background(), v.method, v.req, reply)
 	if err != nil {
 		log.Printf("Failed to invoke call over established connection %v", err)
-		return nil, err
+		return nil, time.Duration(-1), err
 	}
+	endTime := time.Now()
 
 	err = v.logEstimation(v.csvLog, "verifier")
 	if err != nil {
 		log.Printf("Error printing to CSV log file: %v", err)
 	}
 
-	return reply, nil
+	return reply, endTime.Sub(startTime), err
 }
 
 func (v *verifier) updateIntervals(reply proto.Message) error {
@@ -184,7 +195,12 @@ func (v *verifier) updateIntervals(reply proto.Message) error {
 
 func (v *verifier) updateEstimations(reply proto.Message) error {
 	if v.strategy != nil {
-		validity, err := v.strategy.determineEstimation(&v.intervals, &v.verifications, &v.estimations)
+		percentile, err := v.percentileResponseTime(0.95)
+		if err != nil {
+			return err
+		}
+
+		validity, err := v.strategy.determineEstimation(&v.intervals, &v.verifications, &v.estimations, percentile)
 		if err != nil {
 			return err
 		}
@@ -199,4 +215,18 @@ func (v *verifier) estimate() (estimate time.Duration, err error) {
 		return 0, nil
 	}
 	return v.estimations[len(v.estimations)-1].validity, nil
+}
+
+func (v *verifier) recordResponseTime(responseTime time.Duration) {
+	v.responseTimeCounter++
+
+	v.responseTimes[v.responseTimeCounter%len(v.responseTimes)] = float64(responseTime.Nanoseconds())
+}
+
+func (v *verifier) percentileResponseTime(percentile float64) (time.Duration, error) {
+	respTime, err := stats.Percentile(v.responseTimes, percentile)
+	if err != nil {
+		return -1, err
+	}
+	return time.Duration(respTime), nil
 }
