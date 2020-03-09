@@ -224,6 +224,15 @@ func initializeStrategy() estimationStrategy {
 			}
 
 			strategy = &updateRiskBasedStrategy{rho: rho}
+		case "qualityelastic":
+			sloStr := dynamicStrategySpecifiers[2]
+			SLO, err := strconv.ParseFloat(sloStr, 64)
+			if err != nil {
+				log.Printf("Failed to parse SLO parameter for Quality-Elastic strategy (%s), acting in passthrough mode", sloStr)
+				return nil
+			}
+
+			strategy = &qualityElasticStrategy{SLO: time.Duration(SLO) * time.Millisecond}
 		default:
 			log.Printf("Unknown dynamic strategy (%s), using simplistic", strategyName)
 			strategy = &simplisticStrategy{}

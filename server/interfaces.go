@@ -9,7 +9,7 @@ import (
 type estimationStrategy interface {
 	initialize()
 	determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error)
-	determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation, responseTime time.Duration) (time.Duration, error)
+	determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation, ninetyFithPercentileResponseTime time.Duration) (time.Duration, error)
 }
 
 // A ValidityEstimator hooks into the server side, and performs estimation of
