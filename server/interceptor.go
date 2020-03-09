@@ -26,7 +26,7 @@ import (
 
 // Initialize new ConfigurableValidityEstimator.
 func (e *ConfigurableValidityEstimator) Initialize(csvLog *log.Logger) {
-	e.verifiers = cache.New(time.Duration(maximumCacheValidity)*time.Second, time.Duration(maximumCacheValidity)*10*time.Second)
+	e.verifiers = cache.New(maxVerifierLifetime, time.Duration(maxVerifierLifetime)*2)
 	e.done = make(chan string, 1000)
 	e.csvLog = csvLog
 	e.csvLog.Printf("timestamp,source,method,estimate\n")
@@ -115,7 +115,7 @@ func (e *ConfigurableValidityEstimator) blacklisted(method string) bool {
 	return false
 }
 
-func (e *ConfigurableValidityEstimator) verificationNeeded(method string, req interface{}) (bool, int) {
+func (e *ConfigurableValidityEstimator) verificationNeeded(method string, req interface{}) (bool, time.Duration) {
 	// TODO Take into consideration, e.g., how often we have been asked to
 	// verify this one particular method and its request. Just to filter
 	// the verification process a bit, keeping the number of verifiers
@@ -134,10 +134,10 @@ func (e *ConfigurableValidityEstimator) verificationNeeded(method string, req in
 			return false, -1
 		}
 		log.Printf("%s(%s) verifier found, but expired. New verification needed.", method, req)
-		return true, maximumCacheValidity
+		return true, maxVerifierLifetime
 	}
 	log.Printf("%s(%s) verifier not found, verification needed", method, req)
-	return true, maximumCacheValidity
+	return true, maxVerifierLifetime
 }
 
 func hash(method string, req interface{}) string {
@@ -164,7 +164,7 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 			now := time.Now()
 
 			strategy := initializeStrategy()
-			verifier, err := newVerifier(cc.Target(), method, req.(proto.Message), reply.(proto.Message), now.Add(time.Duration(expiration)*time.Second), strategy, e.csvLog, e.done)
+			verifier, err := newVerifier(cc.Target(), method, req.(proto.Message), reply.(proto.Message), now.Add(expiration), strategy, e.csvLog, e.done)
 			if err != nil {
 				log.Printf("Unable to create verifier for %s(%s): %v", method, req, err)
 				return err
