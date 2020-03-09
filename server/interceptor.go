@@ -24,50 +24,9 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-const (
-	// MaximumCacheValidity is the highest number of seconds that an object
-	// can be considered valid.
-	MaximumCacheValidity = 1000
-)
-
-// A ValidityEstimator hooks into the server side, and performs estimation of
-// how long responses may be stored in cache.
-type ValidityEstimator interface {
-	// EstimateMaxAge estimates how long a given request/response should be
-	// possible to cache (in seconds).
-	estimateMaxAge(fullMethod string, req interface{}, resp interface{}) (int, error)
-	// UnaryServerInterceptor returns the gRPC Interceptor for Unary operations
-	// that uses the EstimateMaxAge function on the request/response objects.
-	UnaryServerInterceptor() grpc.UnaryServerInterceptor
-	// UnaryClientInterceptor creates a gRPC Interceptor for outgoing calls,
-	// and is used for capturing information needed to make estimations
-	// more accurate by polling the origin server.
-	UnaryClientInterceptor() grpc.UnaryClientInterceptor
-}
-
-// Verifier verifies and estimates TTL for request/response objects.
-type Verifier interface {
-	run()
-	update(reply proto.Message) error
-	estimate() (time.Duration, error)
-	logEstimation(log *log.Logger, source string) error
-	String() string
-}
-
-// ConfigurableValidityEstimator is a configurable ValidityEstimator.
-type ConfigurableValidityEstimator struct {
-	// We abuse the cache data structure here, s.t. it is used as a handy
-	// place to store items that expire and are then garbage collected.
-	verifiers *cache.Cache
-	// A channel where verifiers can specify their ID as being done.
-	done chan string
-	// Where to log CSV records
-	csvLog *log.Logger
-}
-
 // Initialize new ConfigurableValidityEstimator.
 func (e *ConfigurableValidityEstimator) Initialize(csvLog *log.Logger) {
-	e.verifiers = cache.New(time.Duration(MaximumCacheValidity)*time.Second, time.Duration(MaximumCacheValidity)*10*time.Second)
+	e.verifiers = cache.New(time.Duration(maximumCacheValidity)*time.Second, time.Duration(maximumCacheValidity)*10*time.Second)
 	e.done = make(chan string, 1000)
 	e.csvLog = csvLog
 	e.csvLog.Printf("timestamp,source,method,estimate\n")
@@ -92,7 +51,7 @@ func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req in
 		verifier := value.(*verifier)
 		err := verifier.update(resp.(proto.Message))
 		if err != nil {
-			log.Printf("Unable to update verifier %s", verifier.String())
+			log.Printf("Unable to update verifier %s", verifier.string())
 			return -1, err
 		}
 
@@ -175,10 +134,10 @@ func (e *ConfigurableValidityEstimator) verificationNeeded(method string, req in
 			return false, -1
 		}
 		log.Printf("%s(%s) verifier found, but expired. New verification needed.", method, req)
-		return true, MaximumCacheValidity
+		return true, maximumCacheValidity
 	}
 	log.Printf("%s(%s) verifier not found, verification needed", method, req)
-	return true, MaximumCacheValidity
+	return true, maximumCacheValidity
 }
 
 func hash(method string, req interface{}) string {
@@ -214,11 +173,11 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 			// expiration is manually handled by our use of the "done" channel
 			err = e.verifiers.Add(hash, verifier, time.Duration(0))
 			if err != nil {
-				log.Printf("Failed to store verifier for %s: %v", verifier.String(), err)
+				log.Printf("Failed to store verifier for %s: %v", verifier.string(), err)
 				return err
 			}
 
-			log.Printf("Stored %s for verification", verifier.String())
+			log.Printf("Stored %s for verification", verifier.string())
 		}
 
 		return nil

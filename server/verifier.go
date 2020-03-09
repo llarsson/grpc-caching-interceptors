@@ -12,21 +12,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type verification struct {
-	reply     proto.Message
-	timestamp time.Time
-}
-
-type estimation struct {
-	validity  time.Duration
-	timestamp time.Time
-}
-
-type interval struct {
-	duration  time.Duration
-	timestamp time.Time
-}
-
 type verifier struct {
 	target     string
 	method     string
@@ -43,18 +28,12 @@ type verifier struct {
 	csvLog *log.Logger
 }
 
-type estimationStrategy interface {
-	initialize()
-	determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error)
-	determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error)
-}
-
 var _ Verifier = (*verifier)(nil)
 
 func (v *verifier) logEstimation(log *log.Logger, source string) error {
 	if len(v.estimations) > 0 {
 		estimation := v.estimations[len(v.estimations)-1]
-		log.Printf("%d,%s,%s,%d\n", time.Now().UnixNano(), v.String(), source, int(estimation.validity.Seconds()))
+		log.Printf("%d,%s,%s,%d\n", time.Now().UnixNano(), v.string(), source, int(estimation.validity.Seconds()))
 		return nil
 	}
 
@@ -62,7 +41,7 @@ func (v *verifier) logEstimation(log *log.Logger, source string) error {
 }
 
 // String is a string representation of a given verifier.
-func (v *verifier) String() string {
+func (v *verifier) string() string {
 	return fmt.Sprintf("%s(%s)", v.method, v.req)
 }
 
@@ -96,7 +75,7 @@ func newVerifier(target string, method string, req proto.Message, resp proto.Mes
 
 	err = v.update(resp)
 	if err != nil {
-		log.Printf("Unable to create verifier for %s", v.String())
+		log.Printf("Unable to create verifier for %s", v.string())
 		return nil, err
 	}
 
@@ -118,18 +97,18 @@ func (v *verifier) run() {
 		}
 
 		delay := v.intervals[len(v.intervals)-1].duration
-		log.Printf("%s scheduled for verification in %s (expires %s)", v.String(), delay, v.expiration)
+		log.Printf("%s scheduled for verification in %s (expires %s)", v.string(), delay, v.expiration)
 
 		time.Sleep(delay)
 
 		if v.finished() {
-			log.Printf("%s needs no further verification", v.String())
+			log.Printf("%s needs no further verification", v.string())
 			break
 		}
 
 		newReply, err := v.fetch()
 		if err != nil {
-			log.Printf("Upstream fetch %s failed: %v", v.String(), err)
+			log.Printf("Upstream fetch %s failed: %v", v.string(), err)
 			continue
 		}
 
@@ -144,7 +123,7 @@ func (v *verifier) run() {
 // update internal data structures and estimations based on new data.
 func (v *verifier) update(reply proto.Message) error {
 	if v.finished() {
-		return status.Errorf(codes.Internal, "Verifier %s finished, cannot be updated anymore", v.String())
+		return status.Errorf(codes.Internal, "Verifier %s finished, cannot be updated anymore", v.string())
 	}
 
 	now := time.Now()
@@ -155,13 +134,13 @@ func (v *verifier) update(reply proto.Message) error {
 	// update estimations
 	err := v.updateEstimations(reply)
 	if err != nil {
-		log.Printf("Error updating estimations for %s <- %s", v.String(), reply)
+		log.Printf("Error updating estimations for %s <- %s", v.string(), reply)
 	}
 
 	// update sleep interval
 	err = v.updateIntervals(reply)
 	if _, static := v.strategy.(*staticStrategy); !static && err != nil {
-		log.Printf("Error updating intervals for %s=(%s)", v.String(), reply)
+		log.Printf("Error updating intervals for %s=(%s)", v.string(), reply)
 	}
 
 	// FIXME Should we need to interrupt the sleeping goroutine, or do we not care?
