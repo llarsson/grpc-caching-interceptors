@@ -28,8 +28,6 @@ type verifier struct {
 	csvLog *log.Logger
 }
 
-var _ Verifier = (*verifier)(nil)
-
 func (v *verifier) logEstimation(log *log.Logger, source string) error {
 	if len(v.estimations) > 0 {
 		estimation := v.estimations[len(v.estimations)-1]

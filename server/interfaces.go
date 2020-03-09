@@ -1,10 +1,8 @@
 package server
 
 import (
-	"log"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
 )
 
@@ -27,13 +25,4 @@ type ValidityEstimator interface {
 	// and is used for capturing information needed to make estimations
 	// more accurate by polling the origin server.
 	UnaryClientInterceptor() grpc.UnaryClientInterceptor
-}
-
-// Verifier verifies and estimates TTL for request/response objects.
-type Verifier interface {
-	run()
-	update(reply proto.Message) error
-	estimate() (time.Duration, error)
-	logEstimation(log *log.Logger, source string) error
-	string() string
 }
