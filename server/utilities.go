@@ -3,14 +3,7 @@ package server
 import (
 	"fmt"
 	"time"
-
-	"github.com/golang/protobuf/proto"
 )
-
-// equalVerifications conveniently checks if two verification structs are equal.
-func equalVerifications(a verification, b verification) bool {
-	return proto.Equal(a.reply, b.reply)
-}
 
 // backwardsUpdateDistance computes backwards K-update distance as in Lee et al.
 // "An Update-Risk Based Approach to TTL Estimation in Web Caching"

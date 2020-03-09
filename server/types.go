@@ -23,6 +23,11 @@ type interval struct {
 	timestamp time.Time
 }
 
+// equalVerifications determines equality between verifications
+func equalVerifications(a verification, b verification) bool {
+	return proto.Equal(a.reply, b.reply)
+}
+
 // ConfigurableValidityEstimator is a configurable ValidityEstimator.
 type ConfigurableValidityEstimator struct {
 	// We abuse the cache data structure here, s.t. it is used as a handy
