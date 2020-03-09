@@ -8,4 +8,5 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	golang.org/x/net v0.0.0-20191009170851-d66e71096ffb
 	google.golang.org/grpc v1.26.0
+	github.com/montanaflynn/stats v0.6.3
 )
