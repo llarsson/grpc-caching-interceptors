@@ -28,6 +28,7 @@ type verifier struct {
 
 	responseTimes       []float64
 	responseTimeCounter int
+	responseTimesFilled bool
 
 	csvLog *log.Logger
 }
@@ -72,6 +73,7 @@ func newVerifier(target string, method string, req proto.Message, resp proto.Mes
 
 		responseTimes:       make([]float64, 256),
 		responseTimeCounter: 0,
+		responseTimesFilled: false,
 
 		csvLog: csvLog,
 
@@ -220,13 +222,29 @@ func (v *verifier) estimate() (estimate time.Duration, err error) {
 func (v *verifier) recordResponseTime(responseTime time.Duration) {
 	v.responseTimeCounter++
 
-	v.responseTimes[v.responseTimeCounter%len(v.responseTimes)] = float64(responseTime.Nanoseconds())
+	// Avoid zeroed out values to influence our percentile calculation
+	// (see also percentileResponseTime)
+	if v.responseTimeCounter >= len(v.responseTimes) {
+		v.responseTimesFilled = true
+		v.responseTimeCounter = 0
+	}
+
+	v.responseTimes[v.responseTimeCounter] = float64(responseTime.Nanoseconds())
 }
 
 func (v *verifier) percentileResponseTime(percentile float64) (time.Duration, error) {
-	respTime, err := stats.Percentile(v.responseTimes, percentile)
+	// Avoid zeroed out values to influence our percentile calculation
+	var recordedResponseTimes []float64
+	if v.responseTimesFilled {
+		recordedResponseTimes = v.responseTimes
+	} else {
+		recordedResponseTimes = v.responseTimes[0:v.responseTimeCounter]
+	}
+
+	respTime, err := stats.Percentile(recordedResponseTimes, percentile)
 	if err != nil {
 		return -1, err
 	}
+
 	return time.Duration(respTime), nil
 }
