@@ -12,6 +12,8 @@ import (
 type qualityElasticStrategy struct {
 	SLO       time.Duration
 	dampening float64
+
+	inner updateRiskBasedStrategy
 }
 
 // compile-time check that we adhere to interface
@@ -27,37 +29,17 @@ func (strat *qualityElasticStrategy) initialize() {
 	}
 
 	log.Printf("Using Quality-Elastic strategy (95th percentile response time SLO=%v, dampening=%v)", strat.SLO, strat.dampening)
+	strat.inner = updateRiskBasedStrategy{rho: 0.0, K: 2}
+	strat.inner.initialize()
 }
 
 func (strat *qualityElasticStrategy) determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
-	estimate, err := lastEstimation(estimations)
-	if err != nil {
-		log.Printf("No previous estimations, relying on default interval")
-		return defaultInterval, nil
-	}
-
-	bounded := math.Max(estimate.validity.Seconds()/2.0, defaultInterval.Seconds())
-
-	return time.Duration(bounded) * time.Second, nil
+	return strat.inner.determineInterval(intervals, verifications, estimations)
 }
 
 func (strat *qualityElasticStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation, ninetyFithPercentileResponseTime time.Duration) (time.Duration, error) {
-	rho := strat.calculateUpdateRisk(ninetyFithPercentileResponseTime)
-	mu := strat.averageUpdateFrequency(verifications)
-	t := -1.0 / mu * math.Log(1.0-rho)
-	return time.Duration(t) * time.Second, nil
-}
-
-func (strat *qualityElasticStrategy) averageUpdateFrequency(verifications *[]verification) float64 {
-	timestamps, updates := backwardsUpdateDistance(verifications, 2)
-	if updates == 0 {
-		log.Printf("No observed value updates yet, using 1.0 as update frequency")
-		return 1.0
-	}
-
-	timespan := time.Now().Sub(timestamps[updates-1])
-
-	return float64(updates) / timespan.Seconds()
+	strat.inner.rho = strat.calculateUpdateRisk(ninetyFithPercentileResponseTime)
+	return strat.inner.determineEstimation(intervals, verifications, estimations, ninetyFithPercentileResponseTime)
 }
 
 func (strat *qualityElasticStrategy) calculateUpdateRisk(ninetyFithPercentileResponseTime time.Duration) float64 {
