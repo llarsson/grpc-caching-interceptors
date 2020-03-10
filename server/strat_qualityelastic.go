@@ -62,5 +62,5 @@ func (strat *qualityElasticStrategy) averageUpdateFrequency(verifications *[]ver
 
 func (strat *qualityElasticStrategy) calculateUpdateRisk(ninetyFithPercentileResponseTime time.Duration) float64 {
 	fraction := float64(ninetyFithPercentileResponseTime.Nanoseconds() / strat.SLO.Nanoseconds())
-	return math.Max(fraction*strat.dampening, 1.0)
+	return math.Max(fraction*strat.dampening, 0.9)
 }
