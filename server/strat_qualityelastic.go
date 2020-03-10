@@ -10,14 +10,23 @@ import (
 // (see strat_updateriskbased.go) and, in a quality-elastic manner, modifies
 // the update-risk parameter based on current response time metrics.
 type qualityElasticStrategy struct {
-	SLO time.Duration
+	SLO       time.Duration
+	dampening float64
 }
 
 // compile-time check that we adhere to interface
 var _ estimationStrategy = (*qualityElasticStrategy)(nil)
 
 func (strat *qualityElasticStrategy) initialize() {
-	log.Printf("Using Quality-Elastic strategy (95th percentile response time SLO=%v)", strat.SLO)
+	// Hopefully reasonable default values(?)
+	if strat.dampening <= 0.0001 {
+		strat.dampening = 0.1
+	}
+	if strat.SLO.Nanoseconds() <= 0 {
+		strat.SLO = time.Duration(100 * time.Millisecond)
+	}
+
+	log.Printf("Using Quality-Elastic strategy (95th percentile response time SLO=%v, dampening=%v)", strat.SLO, strat.dampening)
 }
 
 func (strat *qualityElasticStrategy) determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
@@ -52,6 +61,6 @@ func (strat *qualityElasticStrategy) averageUpdateFrequency(verifications *[]ver
 }
 
 func (strat *qualityElasticStrategy) calculateUpdateRisk(ninetyFithPercentileResponseTime time.Duration) float64 {
-	// TODO Smartness based on response time goes here
-	return 0.1
+	fraction := float64(ninetyFithPercentileResponseTime.Nanoseconds() / strat.SLO.Nanoseconds())
+	return math.Max(fraction*strat.dampening, 1.0)
 }
