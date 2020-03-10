@@ -175,6 +175,8 @@ func (v *verifier) fetch() (proto.Message, time.Duration, error) {
 	}
 	endTime := time.Now()
 
+	v.recordResponseTime(endTime.Sub(startTime))
+
 	err = v.logEstimation(v.csvLog, "verifier")
 	if err != nil {
 		log.Printf("Error printing to CSV log file: %v", err)
