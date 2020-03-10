@@ -199,9 +199,10 @@ func (v *verifier) updateIntervals(reply proto.Message) error {
 
 func (v *verifier) updateEstimations(reply proto.Message) error {
 	if v.strategy != nil {
-		percentile, err := v.percentileResponseTime(0.95)
+		percentile, err := v.percentileResponseTime(95)
 		if err != nil {
-			return err
+			log.Printf("Failed to update response times %v", err)
+			// but keep going, though...
 		}
 
 		validity, err := v.strategy.determineEstimation(&v.intervals, &v.verifications, &v.estimations, percentile)
