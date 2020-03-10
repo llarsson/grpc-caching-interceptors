@@ -201,8 +201,9 @@ func (v *verifier) updateEstimations(reply proto.Message) error {
 	if v.strategy != nil {
 		percentile, err := v.percentileResponseTime(95)
 		if err != nil {
+			// This is more a warning than anything else -- not something
+			// to abort the function over, at any rate
 			log.Printf("Failed to update response times %v", err)
-			// but keep going, though...
 		}
 
 		validity, err := v.strategy.determineEstimation(&v.intervals, &v.verifications, &v.estimations, percentile)
