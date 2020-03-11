@@ -44,5 +44,5 @@ func (strat *qualityElasticStrategy) determineEstimation(intervals *[]interval, 
 
 func (strat *qualityElasticStrategy) calculateUpdateRisk(ninetyFithPercentileResponseTime time.Duration) float64 {
 	fraction := float64(ninetyFithPercentileResponseTime.Nanoseconds() / strat.SLO.Nanoseconds())
-	return math.Max(fraction*strat.dampening, 0.9)
+	return math.Min(fraction*strat.dampening, 0.9)
 }
