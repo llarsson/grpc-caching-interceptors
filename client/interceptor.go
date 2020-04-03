@@ -42,7 +42,7 @@ type InmemoryCachingInterceptor struct {
 // no such response is found, the call is allowed to continue as usual,
 // via a client call (which should be intercepted also).
 func (interceptor *InmemoryCachingInterceptor) UnaryServerInterceptor(csvLog *log.Logger) grpc.UnaryServerInterceptor {
-	csvLog.Printf("timestamp,source,method,response\n")
+	csvLog.Printf("timestamp,source,method\n")
 
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		reqMessage := req.(proto.Message)
@@ -51,7 +51,7 @@ func (interceptor *InmemoryCachingInterceptor) UnaryServerInterceptor(csvLog *lo
 		if value, found := interceptor.Cache.Get(hash); found {
 			grpc.SendHeader(ctx, metadata.Pairs("x-cache", "hit"))
 			log.Printf("Using cached response for call to %s(%s)", info.FullMethod, req)
-			csvLog.Printf("%d,cache,%s(%s),%s\n", time.Now().UnixNano(), info.FullMethod, reqMessage, value)
+			csvLog.Printf("%d,cache,%s\n", time.Now().UnixNano(), info.FullMethod)
 			return value, nil
 		}
 
@@ -61,7 +61,7 @@ func (interceptor *InmemoryCachingInterceptor) UnaryServerInterceptor(csvLog *lo
 			return nil, err
 		}
 
-		csvLog.Printf("%d,upstream,%s(%s),%s\n", time.Now().UnixNano(), info.FullMethod, reqMessage, resp)
+		csvLog.Printf("%d,upstream,%s\n", time.Now().UnixNano(), info.FullMethod)
 
 		return resp, nil
 	}

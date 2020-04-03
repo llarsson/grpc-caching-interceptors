@@ -36,7 +36,7 @@ type verifier struct {
 func (v *verifier) logEstimation(log *log.Logger, source string) error {
 	if len(v.estimations) > 0 {
 		estimation := v.estimations[len(v.estimations)-1]
-		log.Printf("%d,%s,%s,%d\n", time.Now().UnixNano(), v.string(), source, int(estimation.validity.Seconds()))
+		log.Printf("%d,%s,%s,%d\n", time.Now().UnixNano(), source, v.method, int(estimation.validity.Seconds()))
 		return nil
 	}
 
