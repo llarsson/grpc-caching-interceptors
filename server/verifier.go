@@ -98,13 +98,14 @@ func (v *verifier) run() {
 			break
 		}
 
-		newReply, err := v.fetch()
-		if err != nil {
-			log.Printf("Upstream fetch %s failed: %v", v.string(), err)
-			continue
-		}
+		//		newReply, err := v.fetch()
+		//		if err != nil {
+		//			log.Printf("Upstream fetch %s failed: %v", v.string(), err)
+		//			continue
+		//		}
 
-		v.update(newReply, verifierSource)
+		// FIXME disabling for testing purposes
+		// v.update(newReply, verifierSource)
 	}
 
 	// signal that we are done and can be deleted.
