@@ -34,7 +34,7 @@ var _ estimationStrategy = (*updateRiskBasedStrategy)(nil)
 func (strat *updateRiskBasedStrategy) initialize() {
 	log.Printf("Using Update-Risk Based strategy (rho = %v)", strat.rho)
 
-	strat.responseHash = 0
+	strat.responseHash = -1
 
 	now := time.Now()
 	strat.olderModification = now

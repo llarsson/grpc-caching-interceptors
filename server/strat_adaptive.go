@@ -25,7 +25,7 @@ func (strat *adaptiveStrategy) initialize() {
 	log.Printf("Using Adaptive TTL strategy with alpha=%f", strat.alpha)
 
 	strat.lastModification = time.Now()
-	strat.responseHash = 0
+	strat.responseHash = -1
 
 	strat.lastEstimation = 0
 }
