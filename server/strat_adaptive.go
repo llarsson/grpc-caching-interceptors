@@ -7,15 +7,14 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-
-	"hash/fnv"
+	"github.com/hashicorp/terraform/helper/hashcode"
 )
 
 type adaptiveStrategy struct {
 	alpha float64
 
 	lastModification time.Time
-	responseHash     uint32
+	responseHash     int
 
 	lastEstimation time.Duration
 
@@ -34,19 +33,10 @@ func (strat *adaptiveStrategy) initialize() {
 	strat.lastEstimation = 0
 }
 
-func hasher(s string) uint32 {
-	h := fnv.New32a()
-	h.Write([]byte(s))
-	return h.Sum32()
-}
-
 func (strat *adaptiveStrategy) update(timestamp time.Time, reply proto.Message) {
-	//incomingHash := hashcode.String(reply.String())
-	incomingHash := hasher(reply.String())
+	incomingHash := hashcode.String(reply.String())
 	strat.mux.Lock()
 	if incomingHash != strat.responseHash {
-		log.Printf("Hash different (%v)!", incomingHash)
-
 		strat.lastModification = timestamp
 		strat.responseHash = incomingHash
 	}
