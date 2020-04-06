@@ -51,7 +51,7 @@ func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req in
 		verifier := value.(*verifier)
 		err := verifier.update(resp.(proto.Message), clientSource)
 		if err != nil {
-			log.Printf("Unable to update verifier %s", verifier.method)
+			log.Printf("Unable to update verifier %s", verifier.string())
 			return -1, err
 		}
 
@@ -95,7 +95,9 @@ func (e *ConfigurableValidityEstimator) UnaryServerInterceptor() grpc.UnaryServe
 			}
 		}
 
-		log.Printf("%s(%s) hit upstream%s", info.FullMethod, req, maxAgeMessage)
+		requestHash := hashcode.String((req.(proto.Message).String()))
+		log.Printf("%s(%d) hit upstream%s", info.FullMethod, requestHash, maxAgeMessage)
+
 		return resp, nil
 	}
 }
@@ -124,14 +126,10 @@ func (e *ConfigurableValidityEstimator) verificationNeeded(method string, req in
 	_, expiration, found := e.verifiers.GetWithExpiration(hash)
 	if found {
 		if expiration.IsZero() || time.Now().Before(expiration) {
-			// Too spammy...
-			//log.Printf("%s(%s) needs no new verifier, object not expired yet (%s)", method, req, expiration)
 			return false, -1
 		}
-		log.Printf("%s(%s) verifier found, but expired. New verification needed.", method, req)
 		return true, maxVerifierLifetime
 	}
-	log.Printf("%s(%s) verifier not found, verification needed", method, req)
 	return true, maxVerifierLifetime
 }
 
@@ -159,9 +157,11 @@ func (e *ConfigurableValidityEstimator) UnaryClientInterceptor() grpc.UnaryClien
 			now := time.Now()
 
 			strategy := initializeStrategy()
-			verifier, err := newVerifier(cc.Target(), method, req.(proto.Message), reply.(proto.Message), now.Add(expiration), strategy, e.csvLog, e.done)
+			requestMessage := req.(proto.Message)
+			replyMessage := req.(proto.Message)
+			verifier, err := newVerifier(cc.Target(), method, requestMessage, replyMessage, now.Add(expiration), strategy, e.csvLog, e.done)
 			if err != nil {
-				log.Printf("Unable to create verifier for %s(%s): %v", method, req, err)
+				log.Printf("Unable to create verifier for %s(%d): %v", method, hashcode.String(requestMessage.String()), err)
 				return err
 			}
 

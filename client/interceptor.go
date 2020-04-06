@@ -46,22 +46,23 @@ func (interceptor *InmemoryCachingInterceptor) UnaryServerInterceptor(csvLog *lo
 
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		reqMessage := req.(proto.Message)
+		requestHash := hashcode.String(reqMessage.String())
 		hash := hashcode.Strings([]string{info.FullMethod, reqMessage.String()})
 
 		if value, found := interceptor.Cache.Get(hash); found {
 			grpc.SendHeader(ctx, metadata.Pairs("x-cache", "hit"))
-			log.Printf("Using cached response for call to %s(%s)", info.FullMethod, req)
+			log.Printf("Using cached response for call to %s(%d)", info.FullMethod, requestHash)
 			csvLog.Printf("%d,cache,%s\n", time.Now().UnixNano(), info.FullMethod)
 			return value, nil
 		}
 
 		resp, err := handler(ctx, req)
 		if err != nil {
-			log.Printf("Failed to call upstream %s(%s): %v", info.FullMethod, req, err)
+			log.Printf("Failed to call upstream %s(%d): %v", info.FullMethod, requestHash, err)
 			return nil, err
 		}
 
-		csvLog.Printf("%d,upstream,%s\n", time.Now().UnixNano(), info.FullMethod)
+		csvLog.Printf("%d,upstream,%s(%d)\n", time.Now().UnixNano(), info.FullMethod, requestHash)
 
 		return resp, nil
 	}
@@ -75,6 +76,7 @@ func (interceptor *InmemoryCachingInterceptor) UnaryServerInterceptor(csvLog *lo
 func (interceptor *InmemoryCachingInterceptor) UnaryClientInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		reqMessage := req.(proto.Message)
+		requestHash := hashcode.String(reqMessage.String())
 		hash := hashcode.Strings([]string{method, reqMessage.String()})
 
 		var header metadata.MD
@@ -94,7 +96,7 @@ func (interceptor *InmemoryCachingInterceptor) UnaryClientInterceptor() grpc.Una
 		}
 
 		grpc.SendHeader(ctx, metadata.Pairs("x-cache", "miss"))
-		log.Printf("Fetched upstream response for call to %s(%s) (%s)", method, req, cacheStatus)
+		log.Printf("Fetched upstream response for call to %s(%d) (%s)", method, requestHash, cacheStatus)
 		return nil
 	}
 }
