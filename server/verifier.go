@@ -145,6 +145,6 @@ func (v *verifier) fetch() (proto.Message, error) {
 	return reply, err
 }
 
-func (v *verifier) estimate() (estimate time.Duration, err error) {
+func (v *verifier) estimate() (time.Duration, error) {
 	return v.estimatedTTL, nil
 }
