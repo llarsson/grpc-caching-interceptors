@@ -98,14 +98,13 @@ func (v *verifier) run() {
 			break
 		}
 
-		//		newReply, err := v.fetch()
-		//		if err != nil {
-		//			log.Printf("Upstream fetch %s failed: %v", v.string(), err)
-		//			continue
-		//		}
+		newReply, err := v.fetch()
+		if err != nil {
+			log.Printf("Upstream fetch %s failed: %v", v.string(), err)
+			continue
+		}
 
-		// FIXME disabling for testing purposes
-		// v.update(newReply, verifierSource)
+		v.update(newReply, verifierSource)
 	}
 
 	// signal that we are done and can be deleted.
@@ -136,6 +135,7 @@ func (v *verifier) finished() bool {
 // fetch new reply from upstream service.
 func (v *verifier) fetch() (proto.Message, error) {
 	reply := proto.Clone(v.responseArchetype)
+	reply.Reset()
 
 	err := v.cc.Invoke(context.Background(), v.method, v.req, reply)
 	if err != nil {
