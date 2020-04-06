@@ -44,25 +44,20 @@ func (e *ConfigurableValidityEstimator) Initialize(csvLog *log.Logger) {
 // estimateMaxAge estimates the cache validity of the specified
 // request/response pair for the given method. The result is given
 // in seconds.
-func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req interface{}, resp interface{}, responseTime time.Duration) (time.Duration, error) {
+func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req interface{}, resp interface{}) (time.Duration, error) {
 	value, found := e.verifiers.Get(hash(fullMethod, req))
 
 	if found {
 		verifier := value.(*verifier)
-		err := verifier.update(resp.(proto.Message), responseTime)
+		err := verifier.update(resp.(proto.Message), clientSource)
 		if err != nil {
-			log.Printf("Unable to update verifier %s", verifier.string())
+			log.Printf("Unable to update verifier %s", verifier.method)
 			return -1, err
 		}
 
 		maxAge, err := verifier.estimate()
 		if err != nil {
 			return -1, err
-		}
-
-		err = verifier.logEstimation(e.csvLog, "client")
-		if err != nil {
-			log.Printf("Failed to log CSV %v", err)
 		}
 
 		return maxAge, nil
@@ -79,21 +74,18 @@ func (e *ConfigurableValidityEstimator) estimateMaxAge(fullMethod string, req in
 func (e *ConfigurableValidityEstimator) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		startTime := time.Now()
 		resp, err := handler(ctx, req)
 		if err != nil {
 			log.Printf("Upstream call failed with error %v", err)
 			return resp, err
 		}
-		endTime := time.Now()
-		responseTime := endTime.Sub(startTime)
 
 		// Only upstream call failures constitute true errors, so we only log others.
 		var maxAgeMessage string
 		if e.blacklisted(info.FullMethod) {
 			maxAgeMessage = fmt.Sprintf(", but method %s blacklisted from caching", info.FullMethod)
 		} else {
-			maxAge, err := e.estimateMaxAge(info.FullMethod, req, resp, responseTime)
+			maxAge, err := e.estimateMaxAge(info.FullMethod, req, resp)
 			if err == nil {
 				ttl := int(math.Round(maxAge.Seconds()))
 				grpc.SetHeader(ctx, metadata.Pairs("cache-control", fmt.Sprintf("must-revalidate, max-age=%d", ttl)))
@@ -200,12 +192,6 @@ func initializeStrategy() estimationStrategy {
 		dynamicStrategySpecifiers := strings.Split(proxyMaxAge, "-")
 		strategyName := strings.Split(proxyMaxAge, "-")[1]
 		switch strategyName {
-		case "tbg1":
-			strategy = &dynamicTBG1Strategy{}
-		case "simplistic":
-			strategy = &simplisticStrategy{}
-		case "nyqvistish":
-			strategy = &nyqvistishStrategy{}
 		case "adaptive":
 			alphaStr := dynamicStrategySpecifiers[2]
 			alpha, err := strconv.ParseFloat(alphaStr, 64)
@@ -224,18 +210,9 @@ func initializeStrategy() estimationStrategy {
 			}
 
 			strategy = &updateRiskBasedStrategy{rho: rho}
-		case "qualityelastic":
-			sloStr := dynamicStrategySpecifiers[2]
-			SLO, err := strconv.ParseFloat(sloStr, 64)
-			if err != nil {
-				log.Printf("Failed to parse SLO parameter for Quality-Elastic strategy (%s), acting in passthrough mode", sloStr)
-				return nil
-			}
-
-			strategy = &qualityElasticStrategy{SLO: time.Duration(SLO) * time.Millisecond}
 		default:
-			log.Printf("Unknown dynamic strategy (%s), using simplistic", strategyName)
-			strategy = &simplisticStrategy{}
+			log.Printf("Unknown dynamic strategy (%s), acting passthrough mode", strategyName)
+			return nil
 		}
 	} else if strings.HasPrefix(proxyMaxAge, "static-") {
 		ageSpecifier := strings.Split(proxyMaxAge, "-")[1]

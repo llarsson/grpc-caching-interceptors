@@ -4,56 +4,92 @@ import (
 	"log"
 	"math"
 	"time"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/hashicorp/terraform/helper/hashcode"
 )
 
 // This implementation embodies (our understanding of) Lee et al.
 // "An Update-Risk Based Approach to TTL Estimation in Web Caching", 2002.
 // https://doi.org/10.1109/WISE.2002.1181640
+//
+// We use K = 2, because the paper found it to be optimal. That means that we
+// save the two "last modification" times, and base our calculations on that.
 type updateRiskBasedStrategy struct {
-	K   int
 	rho float64
+
+	olderModification time.Time
+	newerModification time.Time
+
+	responseHash int
+
+	lastEstimation time.Duration
+
+	observedUpdates int
 }
 
 // compile-time check that we adhere to interface
 var _ estimationStrategy = (*updateRiskBasedStrategy)(nil)
 
 func (strat *updateRiskBasedStrategy) initialize() {
-	if strat.K == 0 {
-		strat.K = 2 // optimum from the paper
+	log.Printf("Using Update-Risk Based strategy (rho = %v)", strat.rho)
+
+	strat.responseHash = 0
+
+	now := time.Now()
+	strat.olderModification = now
+	strat.newerModification = now
+
+	strat.lastEstimation = 0
+
+	strat.observedUpdates = 0
+}
+
+func (strat *updateRiskBasedStrategy) update(timestamp time.Time, reply proto.Message) {
+	incomingHash := hashcode.String(reply.String())
+
+	if incomingHash != strat.responseHash {
+		strat.olderModification = strat.newerModification
+		strat.newerModification = timestamp
+
+		strat.responseHash = incomingHash
+
+		if strat.observedUpdates < 2 {
+			strat.observedUpdates++
+		}
 	}
-	log.Printf("Using Update-Risk Based strategy (K=%d)", strat.K)
 }
 
 // This comes in no way from the original paper, but our interface demands it,
 // so this should be a reasonable implementation of interval determination.
-func (strat *updateRiskBasedStrategy) determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
-	estimate, err := lastEstimation(estimations)
-	if err != nil {
-		log.Printf("No previous estimations, relying on default interval")
-		return defaultInterval, nil
-	}
-
-	bounded := math.Max(estimate.validity.Seconds()/2.0, defaultInterval.Seconds())
-
-	return time.Duration(bounded) * time.Second, nil
+func (strat *updateRiskBasedStrategy) determineInterval() time.Duration {
+	bounded := math.Max(strat.lastEstimation.Seconds()/2.0, defaultInterval.Seconds())
+	return time.Duration(bounded) * time.Second
 }
 
-func (strat *updateRiskBasedStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation, _ time.Duration) (time.Duration, error) {
-	mu := strat.averageUpdateFrequency(verifications)
+func (strat *updateRiskBasedStrategy) determineEstimation() time.Duration {
+	mu := strat.averageUpdateFrequency()
 	t := -1.0 / mu * math.Log(1.0-strat.rho)
-	return time.Duration(t) * time.Second, nil
+	return time.Duration(t) * time.Second
 }
 
-func (strat *updateRiskBasedStrategy) averageUpdateFrequency(verifications *[]verification) float64 {
-	timestamps, updates := backwardsUpdateDistance(verifications, strat.K)
-	if updates == 0 {
+func (strat *updateRiskBasedStrategy) averageUpdateFrequency() float64 {
+	if strat.observedUpdates == 0 {
 		log.Printf("No observed value updates yet, using 1.0 as update frequency")
 		return 1.0
 	}
 
+	var lastModified time.Time
+
+	if strat.observedUpdates == 1 {
+		lastModified = strat.newerModification
+	} else {
+		lastModified = strat.olderModification
+	}
+
 	// We requested K updates back, but perhaps got less. So we must rely
 	// on what we actually got back from the data.
-	timespan := time.Now().Sub(timestamps[updates-1])
+	timespan := time.Now().Sub(lastModified)
 
-	return float64(updates) / timespan.Seconds()
+	return float64(strat.observedUpdates) / timespan.Seconds()
 }

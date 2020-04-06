@@ -6,11 +6,16 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/montanaflynn/stats"
+	"github.com/hashicorp/terraform/helper/hashcode"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+)
+
+const (
+	verifierSource = "verifier"
+	clientSource   = "client"
 )
 
 type verifier struct {
@@ -20,32 +25,15 @@ type verifier struct {
 	expiration time.Time
 	strategy   estimationStrategy
 
-	intervals     []interval
-	verifications []verification
-	cc            *grpc.ClientConn
-	estimations   []estimation
-	done          chan string
+	cc   *grpc.ClientConn
+	done chan string
 
-	responseTimes       []float64
-	responseTimeCounter int
-	responseTimesFilled bool
+	responseArchetype proto.Message
 
-	csvLog *log.Logger
-}
+	estimatedTTL time.Duration
 
-func (v *verifier) logEstimation(log *log.Logger, source string) error {
-	if len(v.estimations) > 0 {
-		estimation := v.estimations[len(v.estimations)-1]
-		log.Printf("%d,%s,%s,%d\n", time.Now().UnixNano(), source, v.method, int(estimation.validity.Seconds()))
-		return nil
-	}
-
-	return fmt.Errorf("no estimations to log yet")
-}
-
-// String is a string representation of a given verifier.
-func (v *verifier) string() string {
-	return fmt.Sprintf("%s(%s)", v.method, v.req)
+	stringRepresentation string
+	csvLog               *log.Logger
 }
 
 // newVerifier creates a new verifier and starts its goroutine. It attempts
@@ -60,35 +48,32 @@ func newVerifier(target string, method string, req proto.Message, resp proto.Mes
 	}
 
 	v := verifier{
-		target:     target,
-		method:     method,
-		req:        req,
-		expiration: expiration,
-		strategy:   strategy,
-
-		intervals:     make([]interval, 0),
-		verifications: make([]verification, 0),
-		estimations:   make([]estimation, 0),
-		cc:            cc,
-
-		responseTimes:       make([]float64, 256),
-		responseTimeCounter: 0,
-		responseTimesFilled: false,
-
-		csvLog: csvLog,
-
-		done: done,
+		target:               target,
+		method:               method,
+		req:                  req,
+		expiration:           expiration,
+		strategy:             strategy,
+		cc:                   cc,
+		responseArchetype:    proto.Clone(resp),
+		estimatedTTL:         0,
+		csvLog:               csvLog,
+		done:                 done,
+		stringRepresentation: fmt.Sprintf("%s(%d)", method, hashcode.String(req.String())),
 	}
 
-	err = v.update(resp, time.Duration(-1))
+	err = v.update(resp, clientSource)
 	if err != nil {
-		log.Printf("Unable to create verifier for %s", v.string())
+		log.Printf("Unable to create verifier for %s", v.method)
 		return nil, err
 	}
 
 	go v.run()
 
 	return &v, nil
+}
+
+func (v *verifier) string() string {
+	return v.stringRepresentation
 }
 
 // run the verifier goroutine.
@@ -98,12 +83,12 @@ func (v *verifier) run() {
 	defer v.cc.Close()
 
 	for {
-		if len(v.intervals) == 0 {
+		delay := v.strategy.determineInterval()
+		if delay <= 0 {
 			time.Sleep(time.Duration(500 * time.Millisecond))
 			continue
 		}
 
-		delay := v.intervals[len(v.intervals)-1].duration
 		log.Printf("%s scheduled for verification in %s (expires %s)", v.string(), delay, v.expiration)
 
 		time.Sleep(delay)
@@ -113,13 +98,13 @@ func (v *verifier) run() {
 			break
 		}
 
-		newReply, responseTime, err := v.fetch()
+		newReply, err := v.fetch()
 		if err != nil {
 			log.Printf("Upstream fetch %s failed: %v", v.string(), err)
 			continue
 		}
 
-		v.update(newReply, responseTime)
+		v.update(newReply, verifierSource)
 	}
 
 	// signal that we are done and can be deleted.
@@ -128,34 +113,17 @@ func (v *verifier) run() {
 }
 
 // update internal data structures and estimations based on new data.
-func (v *verifier) update(reply proto.Message, responseTime time.Duration) error {
+func (v *verifier) update(reply proto.Message, source string) error {
 	if v.finished() {
 		return status.Errorf(codes.Internal, "Verifier %s finished, cannot be updated anymore", v.string())
 	}
 
-	v.recordResponseTime(responseTime)
-
 	now := time.Now()
+	v.strategy.update(now, reply)
+	v.estimatedTTL = v.strategy.determineEstimation()
 
-	// record new data
-	v.verifications = append(v.verifications, verification{reply: proto.Clone(reply), timestamp: now})
+	v.csvLog.Printf("%d,%s,%s,%d\n", time.Now().UnixNano(), source, v.string(), int(v.estimatedTTL.Seconds()))
 
-	// update estimations
-	err := v.updateEstimations(reply)
-	if err != nil {
-		log.Printf("Error updating estimations for %s <- %s", v.string(), reply)
-	}
-
-	// update sleep interval
-	err = v.updateIntervals(reply)
-	if _, static := v.strategy.(*staticStrategy); !static && err != nil {
-		log.Printf("Error updating intervals for %s=(%s)", v.string(), reply)
-	}
-
-	// FIXME Should we need to interrupt the sleeping goroutine, or do we not care?
-
-	// The only true failure is if we are finished and yet were called.
-	// The others do not matter.
 	return nil
 }
 
@@ -165,90 +133,18 @@ func (v *verifier) finished() bool {
 }
 
 // fetch new reply from upstream service.
-func (v *verifier) fetch() (proto.Message, time.Duration, error) {
-	reply := proto.Clone(v.verifications[0].reply)
-	startTime := time.Now()
+func (v *verifier) fetch() (proto.Message, error) {
+	reply := proto.Clone(v.responseArchetype)
+
 	err := v.cc.Invoke(context.Background(), v.method, v.req, reply)
 	if err != nil {
 		log.Printf("Failed to invoke call over established connection %v", err)
-		return nil, time.Duration(-1), err
-	}
-	endTime := time.Now()
-
-	v.recordResponseTime(endTime.Sub(startTime))
-
-	err = v.logEstimation(v.csvLog, "verifier")
-	if err != nil {
-		log.Printf("Error printing to CSV log file: %v", err)
+		return nil, err
 	}
 
-	return reply, endTime.Sub(startTime), err
-}
-
-func (v *verifier) updateIntervals(reply proto.Message) error {
-	if v.strategy != nil {
-		duration, err := v.strategy.determineInterval(&v.intervals, &v.verifications, &v.estimations)
-		if err != nil {
-			return err
-		}
-		v.intervals = append(v.intervals, interval{duration: duration, timestamp: time.Now()})
-	}
-
-	return nil
-}
-
-func (v *verifier) updateEstimations(reply proto.Message) error {
-	if v.strategy != nil {
-		percentile, err := v.percentileResponseTime(95)
-		if err != nil {
-			// This is more a warning than anything else -- not something
-			// to abort the function over, at any rate
-			log.Printf("Failed to update response times %v", err)
-		}
-
-		validity, err := v.strategy.determineEstimation(&v.intervals, &v.verifications, &v.estimations, percentile)
-		if err != nil {
-			return err
-		}
-		v.estimations = append(v.estimations, estimation{validity: validity, timestamp: time.Now()})
-	}
-
-	return nil
+	return reply, err
 }
 
 func (v *verifier) estimate() (estimate time.Duration, err error) {
-	if len(v.estimations) == 0 {
-		return 0, nil
-	}
-	return v.estimations[len(v.estimations)-1].validity, nil
-}
-
-func (v *verifier) recordResponseTime(responseTime time.Duration) {
-	v.responseTimeCounter++
-
-	// Avoid zeroed out values to influence our percentile calculation
-	// (see also percentileResponseTime)
-	if v.responseTimeCounter >= len(v.responseTimes) {
-		v.responseTimesFilled = true
-		v.responseTimeCounter = 0
-	}
-
-	v.responseTimes[v.responseTimeCounter] = float64(responseTime.Nanoseconds())
-}
-
-func (v *verifier) percentileResponseTime(percentile float64) (time.Duration, error) {
-	// Avoid zeroed out values to influence our percentile calculation
-	var recordedResponseTimes []float64
-	if v.responseTimesFilled {
-		recordedResponseTimes = v.responseTimes
-	} else {
-		recordedResponseTimes = v.responseTimes[0:v.responseTimeCounter]
-	}
-
-	respTime, err := stats.Percentile(recordedResponseTimes, percentile)
-	if err != nil {
-		return -1, err
-	}
-
-	return time.Duration(respTime), nil
+	return v.estimatedTTL, nil
 }

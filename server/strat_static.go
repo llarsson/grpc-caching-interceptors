@@ -1,9 +1,10 @@
 package server
 
 import (
-	"fmt"
 	"log"
 	"time"
+
+	"github.com/golang/protobuf/proto"
 )
 
 type staticStrategy struct {
@@ -17,10 +18,15 @@ func (strat *staticStrategy) initialize() {
 	log.Printf("Using static TTL=%d for all non-blacklisted responses", int(strat.ttl.Seconds()))
 }
 
-func (strat *staticStrategy) determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error) {
-	return time.Duration(-1), fmt.Errorf("Static TTL=%d strategy does not need intervals", int(strat.ttl.Seconds()))
+func (strat *staticStrategy) update(timestamp time.Time, reply proto.Message) {
+	// Static does not concern iteself with updates :)
 }
 
-func (strat *staticStrategy) determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation, _ time.Duration) (time.Duration, error) {
-	return strat.ttl, nil
+func (strat *staticStrategy) determineInterval() time.Duration {
+	// Static also does not concern itself with verification intervals :)
+	return time.Duration(-1)
+}
+
+func (strat *staticStrategy) determineEstimation() time.Duration {
+	return strat.ttl
 }

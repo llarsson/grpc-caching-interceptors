@@ -3,13 +3,15 @@ package server
 import (
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
 )
 
 type estimationStrategy interface {
 	initialize()
-	determineInterval(intervals *[]interval, verifications *[]verification, estimations *[]estimation) (time.Duration, error)
-	determineEstimation(intervals *[]interval, verifications *[]verification, estimations *[]estimation, ninetyFithPercentileResponseTime time.Duration) (time.Duration, error)
+	update(timestamp time.Time, reply proto.Message)
+	determineInterval() time.Duration
+	determineEstimation() time.Duration
 }
 
 // A ValidityEstimator hooks into the server side, and performs estimation of
