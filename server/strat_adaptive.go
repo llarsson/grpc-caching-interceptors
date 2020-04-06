@@ -3,6 +3,7 @@ package server
 import (
 	"log"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -16,6 +17,8 @@ type adaptiveStrategy struct {
 	responseHash     int
 
 	lastEstimation time.Duration
+
+	mux sync.Mutex
 }
 
 // compile-time check that we adhere to interface
@@ -32,10 +35,12 @@ func (strat *adaptiveStrategy) initialize() {
 
 func (strat *adaptiveStrategy) update(timestamp time.Time, reply proto.Message) {
 	incomingHash := hashcode.String(reply.String())
+	strat.mux.Lock()
 	if incomingHash != strat.responseHash {
 		strat.lastModification = timestamp
 		strat.responseHash = incomingHash
 	}
+	strat.mux.Unlock()
 }
 
 func (strat *adaptiveStrategy) determineInterval() time.Duration {
@@ -45,5 +50,10 @@ func (strat *adaptiveStrategy) determineInterval() time.Duration {
 
 func (strat *adaptiveStrategy) determineEstimation() time.Duration {
 	estimatedTTL := float64(time.Now().Sub(strat.lastModification).Nanoseconds()) * strat.alpha
-	return time.Duration(int64(estimatedTTL))
+
+	strat.mux.Lock()
+	strat.lastEstimation = time.Duration(int64(estimatedTTL))
+	strat.mux.Unlock()
+
+	return strat.lastEstimation
 }
