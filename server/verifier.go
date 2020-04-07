@@ -7,7 +7,6 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hashicorp/terraform/helper/hashcode"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -98,6 +97,15 @@ func (v *verifier) run() {
 			break
 		}
 
+		// Research idea:
+		//
+		// Add a verification step here, where data is fetched from the
+		// upstream service. Periodically polling the upstream data
+		// source in a proactive manner should make it possible to
+		// reduce data staleness.
+		//
+		// The code below shows how this could be added.
+		//
 		//		newReply, err := v.fetch()
 		//		if err != nil {
 		//			log.Printf("Upstream fetch %s failed: %v", v.string(), err)
@@ -132,19 +140,22 @@ func (v *verifier) finished() bool {
 	return time.Now().After(v.expiration)
 }
 
-// fetch new reply from upstream service.
-func (v *verifier) fetch() (proto.Message, error) {
-	reply := proto.Clone(v.responseArchetype)
-	reply.Reset()
-
-	err := v.cc.Invoke(context.Background(), v.method, v.req, reply)
-	if err != nil {
-		log.Printf("Failed to invoke call over established connection %v", err)
-		return nil, err
-	}
-
-	return reply, err
-}
+// This code is for illustration purposes only. Initial testing shows that it
+// contains bugs, and cannot be used in its current state.
+//
+// fetch a new response from the upstream service (proactive operation).
+// func (v *verifier) fetch() (proto.Message, error) {
+// 	reply := proto.Clone(v.responseArchetype)
+// 	reply.Reset()
+//
+// 	err := v.cc.Invoke(context.Background(), v.method, v.req, reply)
+// 	if err != nil {
+// 		log.Printf("Failed to invoke call over established connection %v", err)
+// 		return nil, err
+// 	}
+//
+// 	return reply, err
+// }
 
 func (v *verifier) estimate() (time.Duration, error) {
 	return v.estimatedTTL, nil
